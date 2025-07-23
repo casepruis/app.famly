@@ -8,7 +8,33 @@ import { Loader2, LogIn, Calendar, CheckSquare, Sparkles, AlertTriangle, LogOut 
 import { toast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 
-const PLATFORM_ADMINS = ["kees.pruis@gmail.com"];
+// Helper function to normalize Google email addresses for consistent comparison
+const normalizeGoogleEmail = (email) => {
+  const lowerEmail = email.toLowerCase();
+  
+  if (lowerEmail.endsWith('@gmail.com') || lowerEmail.endsWith('@googlemail.com')) {
+    const parts = lowerEmail.split('@');
+    let localPart = parts[0];
+    const domainPart = 'gmail.com'; // Standardize to gmail.com
+
+    // Remove all dots from the local part
+    localPart = localPart.replace(/\./g, '');
+
+    // Remove any text after a '+' in the local part
+    const plusIndex = localPart.indexOf('+');
+    if (plusIndex !== -1) {
+      localPart = localPart.substring(0, plusIndex);
+    }
+
+    return `${localPart}@${domainPart}`;
+  }
+  return lowerEmail;
+};
+
+// PLATFORM_ADMINS emails should ideally be stored in their canonical/normalized form
+// if they are Google emails (e.g., 'keespruis@gmail.com' instead of 'kees.pruis@gmail.com')
+// for consistency with the normalization logic.
+const PLATFORM_ADMINS = ["kees.pruis@gmail.com"]; // Assuming this is the canonical form stored
 
 export default function Index() {
   const navigate = useNavigate();
@@ -28,7 +54,7 @@ export default function Index() {
       
       try {
         const user = await User.me();
-        setUserEmail(user.email);
+        setUserEmail(user.email); // Store original email for display purposes
         setAuthStatus('authenticated');
 
         if (user && user.family_id) {
@@ -37,13 +63,15 @@ export default function Index() {
           return;
         }
 
-        // Check whitelist status - but don't block platform admins (case-insensitive)
-        if (!PLATFORM_ADMINS.map(e => e.toLowerCase()).includes(user.email.toLowerCase())) {
+        // Apply robust normalization to both platform admin and user emails
+        const normalizedUserEmail = normalizeGoogleEmail(user.email);
+        const normalizedPlatformAdmins = PLATFORM_ADMINS.map(normalizeGoogleEmail);
+
+        if (!normalizedPlatformAdmins.includes(normalizedUserEmail)) {
           setStatus('Checking access permissions...');
 
-          // --- REVERTED TO SECURE, SERVER-SIDE FILTERING ---
-          const userEmailLower = user.email.toLowerCase();
-          const whitelistEntries = await UserWhitelist.filter({ email: userEmailLower });
+          // Use the robustly normalized email for the database query
+          const whitelistEntries = await UserWhitelist.filter({ email: normalizedUserEmail });
           
           const hasActiveEntry = whitelistEntries.some(entry => entry.status === 'active');
 

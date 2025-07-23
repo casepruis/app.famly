@@ -8,7 +8,7 @@ import { createPageUrl } from "@/utils";
 import MemberDialog from "../components/familymembers/MemberDialog";
 import { useToast } from "@/components/ui/use-toast";
 import { useLanguage } from "@/components/common/LanguageProvider";
-import { MoreHorizontal, Trash, Edit, Gift, MessageCircle, Bot, User as UserIcon, Mail } from "lucide-react";
+import { MoreHorizontal, Trash, Edit, Gift, MessageCircle, Bot, User as UserIcon, Mail, Plus } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import Joyride from "../components/common/Joyride";
 import { SendEmail } from "@/api/integrations";
@@ -484,10 +484,16 @@ export default function FamilyMembers() {
         
         <div className="space-y-8">
           <div>
-            <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
-              <UserIcon className="w-5 h-5 text-blue-500" />
-              {t('familyMembers') || 'Family Members'}
-            </h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
+                <UserIcon className="w-5 h-5 text-blue-500" />
+                {t('familyMembers') || 'Family Members'}
+              </h2>
+              <Button onClick={handleAddNew} size="sm">
+                <Plus className="mr-2 h-4 w-4" />
+                {t('addMember') || 'Add Member'}
+              </Button>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               <AnimatePresence>
                 {regularMembers.map((member, index) => (

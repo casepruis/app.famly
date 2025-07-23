@@ -332,7 +332,7 @@ function LayoutContent({ children, currentPageName }) {
   }, [currentPageName]);
 
   const showAddAction = useMemo(() => {
-    return ['Schedule', 'Tasks', 'Events'].includes(currentPageName);
+    return ['Schedule', 'Tasks', 'Events', 'FamilyMembers'].includes(currentPageName);
   }, [currentPageName]);
 
   const activeConversationId = new URLSearchParams(location.search).get('id');

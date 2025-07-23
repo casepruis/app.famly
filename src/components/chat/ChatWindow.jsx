@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { User, FamilyMember, ChatMessage, Conversation, Task, ScheduleEvent } from '@/api/entities';
+import { User, FamilyMember, ChatMessage, Conversation, Task, ScheduleEvent, WishlistItem } from '@/api/entities';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Send, Loader2, Bot, Sparkles } from "lucide-react";
 import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from "@/components/ui/use-toast";
 import { InvokeLLM } from '@/api/integrations';
-import InlineTaskReview from './InlineTaskReview';
+import TasksReviewer from './TasksReviewer';
 import VacationEventsReview from './VacationEventsReview';
 
 export default function ChatWindow({ conversationId }) {
@@ -160,8 +160,11 @@ export default function ChatWindow({ conversationId }) {
                 return `${sender?.name || 'Unknown'}: ${msg.content}`;
             }).join('\n');
 
-            const familyMemberInfo = familyMembers.filter(m => m.role !== 'ai_assistant').map(m => ({ id: m.id, name: m.name }));
-            const familyId = currentUserMember?.family_id;
+            // SECURITY FIX: Only include members from the current user's family
+            const currentUserFamilyId = currentUserMember?.family_id;
+            const safeFamilyMemberInfo = familyMembers
+                .filter(m => m.family_id === currentUserFamilyId && m.role !== 'ai_assistant')
+                .map(m => ({ id: m.id, name: m.name }));
 
             const response = await InvokeLLM({
                 prompt: `You are famly.ai, a helpful Dutch family assistant. Analyze the ENTIRE CHAT LOG provided below to provide a summary and create actionable items.
@@ -171,32 +174,43 @@ CHAT LOG:
 ${conversationHistory}
 ---
 
+You can help with:
+1. Creating TASKS (like "maak een taak om de was te doen")
+2. Scheduling EVENTS (like "plan een afspraak voor morgen")  
+3. Adding items to WISHLISTS (like "voeg dit toe aan mijn verlanglijst")
+
 Based on the chat, identify:
 1. A concise summary of the conversation in Dutch.
 2. Any tasks that need to be created.
 3. Any events that need to be scheduled.
+4. Any items to add to wishlists.
 
-Family Members: ${JSON.stringify(familyMemberInfo)}
-Family ID: ${familyId}
+Family Members: ${JSON.stringify(safeFamilyMemberInfo)}
+Current User ID: ${currentUserMember?.id}
+Family ID: ${currentUserFamilyId}
 
 Respond with a JSON object with the following structure:
 {
   "summary": "Een korte samenvatting van het gesprek in het Nederlands.",
   "tasks": [
-    { "title": "...", "description": "...", "assigned_to": ["member_id"], "family_id": "${familyId}" }
+    { "title": "string", "description": "string", "assigned_to": ["string: an actual family member ID from the 'Family Members' list"], "family_id": "${currentUserFamilyId}" }
   ],
   "events": [
-    { "title": "...", "start_time": "YYYY-MM-DDTHH:MM:SS", "end_time": "...", "family_member_ids": ["member_id"], "family_id": "${familyId}" }
+    { "title": "string", "start_time": "string: YYYY-MM-DDTHH:MM:SS format", "end_time": "string: YYYY-MM-DDTHH:MM:SS format", "family_member_ids": ["string: an actual family member ID from the 'Family Members' list"], "family_id": "${currentUserFamilyId}" }
+  ],
+  "wishlist_items": [
+    { "name": "string", "url": "string: optional URL", "family_member_id": "string: an actual family member ID from the 'Family Members' list" }
   ]
 }
 
-If no tasks or events are found, return empty arrays. The summary is mandatory.`,
+If no tasks, events, or wishlist items are found, return empty arrays. The summary is mandatory.`,
                 response_json_schema: {
                     type: "object",
                     properties: {
                         summary: { type: "string" },
                         tasks: { type: "array", items: { type: "object" } },
-                        events: { type: "array", items: { type: "object" } }
+                        events: { type: "array", items: { type: "object" } },
+                        wishlist_items: { type: "array", items: { type: "object" } }
                     },
                     required: ["summary"]
                 }
@@ -213,10 +227,13 @@ If no tasks or events are found, return empty arrays. The summary is mandatory.`
                 message_type: 'ai_suggestion'
             });
 
-            if ((response.tasks && response.tasks.length > 0) || (response.events && response.events.length > 0)) {
+            if ((response.tasks && response.tasks.length > 0) || 
+                (response.events && response.events.length > 0) ||
+                (response.wishlist_items && response.wishlist_items.length > 0)) {
                 setPendingAction({
                     tasks: response.tasks || [],
                     events: response.events || [],
+                    wishlist_items: response.wishlist_items || [],
                     messageId: createdAiMessage.id
                 });
             }
@@ -229,13 +246,14 @@ If no tasks or events are found, return empty arrays. The summary is mandatory.`
         }
     };
 
-    const handleConfirmActions = async (confirmedTasks, confirmedEvents) => {
+    const handleConfirmActions = async (confirmedTasks, confirmedEvents, confirmedWishlistItems = []) => {
         try {
             if (confirmedTasks.length > 0) await Task.bulkCreate(confirmedTasks);
             if (confirmedEvents.length > 0) await ScheduleEvent.bulkCreate(confirmedEvents);
+            if (confirmedWishlistItems.length > 0) await WishlistItem.bulkCreate(confirmedWishlistItems);
 
-            if (confirmedTasks.length > 0 || confirmedEvents.length > 0) {
-                toast({ title: "AI Suggestions Added", description: "Tasks and events have been added to your schedule." });
+            if (confirmedTasks.length > 0 || confirmedEvents.length > 0 || confirmedWishlistItems.length > 0) {
+                toast({ title: "AI Suggestions Added", description: "Tasks, events, and wishlist items have been added." });
             }
         } catch (error) {
             console.error("Error confirming AI actions:", error);
@@ -309,10 +327,35 @@ If no tasks or events are found, return empty arrays. The summary is mandatory.`
                                 {pendingAction && msg.id === pendingAction.messageId && (
                                     <div className={`mt-2 ${isCurrentUser ? 'ml-auto' : 'ml-11'}`}>
                                         {pendingAction.tasks.length > 0 && (
-                                            <InlineTaskReview tasks={pendingAction.tasks} familyMembers={familyMembers} onConfirm={(confirmed) => handleConfirmActions(confirmed, [])} />
+                                            <TasksReviewer 
+                                                tasks={pendingAction.tasks} 
+                                                familyMembers={familyMembers} 
+                                                onConfirm={(confirmed) => handleConfirmActions(confirmed, [], [])}
+                                                onCancel={() => setPendingAction(null)}
+                                            />
                                         )}
                                         {pendingAction.events.length > 0 && (
-                                            <VacationEventsReview events={pendingAction.events} onConfirm={(confirmed) => handleConfirmActions([], confirmed)} />
+                                            <VacationEventsReview 
+                                                events={pendingAction.events} 
+                                                onConfirm={(confirmed) => handleConfirmActions([], confirmed, [])} 
+                                            />
+                                        )}
+                                        {pendingAction.wishlist_items && pendingAction.wishlist_items.length > 0 && (
+                                            <div className="p-3 bg-purple-50/50 border border-purple-200 rounded-lg shadow-sm space-y-2">
+                                                <h4 className="font-semibold text-sm text-purple-800">Wishlist Items:</h4>
+                                                {pendingAction.wishlist_items.map((item, i) => {
+                                                    const member = familyMembers.find(m => m.id === item.family_member_id);
+                                                    return (
+                                                        <div key={i} className="text-sm bg-white p-2 rounded border">
+                                                            <strong>{item.name}</strong> voor {member?.name}
+                                                        </div>
+                                                    );
+                                                })}
+                                                <div className="flex justify-end gap-2 pt-2">
+                                                    <Button variant="ghost" size="sm" onClick={() => setPendingAction(null)}>Cancel</Button>
+                                                    <Button size="sm" onClick={() => handleConfirmActions([], [], pendingAction.wishlist_items)} className="bg-purple-600 hover:bg-purple-700">Add to Wishlist</Button>
+                                                </div>
+                                            </div>
                                         )}
                                     </div>
                                 )}
