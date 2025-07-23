@@ -287,7 +287,7 @@ const translations = {
   nl: {
     // General
     dashboard: 'Dashboard',
-    schedule: 'Schema',
+    schedule: 'Planning',
     tasks: 'Taken',
     events: 'Evenementen',
     admin: 'Beheer',
@@ -320,8 +320,9 @@ const translations = {
 
     // AI Assistant
     aiAssistant: 'AI-assistent',
-    aiAssistantTitle: 'Je persoonlijke assistent',
-    aiAssistantTagline: 'Hoe kan ik mijn famlyleven vereenvoudigen?',
+    aiAssistantTitle: 'Jouw persoonlijke assistent',
+    aiAssistantTagline: 'Hoe kan ik jouw gezinsleven vereenvoudigen?',
+    aiSuggestedTasksTitle: 'AI Voorgestelde Taken:',
     aiError: "Sorry, er ging iets mis. Kun je het anders formuleren?",
     actionCancelled: "Oké, ik zal het niet doen.",
     noFamilyIdError: "Ik kan dit niet doen zonder famlycontext. Maak eerst een famly aan of sluit je aan.",
