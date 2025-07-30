@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CheckCircle2, Circle, Clock, Star, Users, Edit, Calendar, Trash2, Check, ChevronDown, ChevronUp } from "lucide-react";
 import { format, isPast, isToday } from "date-fns";
-import { motion, PanInfo } from "framer-motion";
+import { motion } from "framer-motion";
 import { useLanguage } from "@/components/common/LanguageProvider";
 
 export default function TaskCard({ task, familyMembers, onStatusChange, onEdit, onDelete }) {

@@ -144,14 +144,16 @@ IMPORTANT: Respond ONLY in ${currentLanguage}. Use proper grammar and natural ph
       </CardHeader>
       <CardContent>
         <div className="min-h-[50px] flex items-start">
-          <p className="text-sm text-famly-text-secondary leading-relaxed">
+          <div className="text-sm text-famly-text-secondary leading-relaxed">
             {isLoading ? (
               <div className="flex items-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin" />
                 {retryCount > 0 && <span className="text-xs">{t('retrying') || 'Retrying...'}</span>}
               </div>
-            ) : insight}
-          </p>
+            ) : (
+              <p>{insight}</p> // Optional, if insight is plain text
+            )}
+          </div>
         </div>
       </CardContent>
     </Card>

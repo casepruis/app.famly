@@ -83,14 +83,17 @@ IMPORTANT: Respond ONLY in ${currentLanguage}. Use proper grammar and natural ph
       </CardHeader>
       <CardContent className="pt-0">
         <div className="min-h-[80px] flex items-start">
-          <p className="text-sm text-famly-text-secondary leading-relaxed">
+          <div className="min-h-[80px] flex items-start text-sm text-famly-text-secondary leading-relaxed">
             {isLoadingFact ? (
               <div className="flex items-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin" />
                 {retryCount > 0 && <span className="text-xs">Retrying...</span>}
               </div>
-            ) : funFact}
-          </p>
+            ) : (
+              <p>{funFact}</p> // ✅ safe to use <p> here because it's plain text
+            )}
+          </div>
+
         </div>
       </CardContent>
     </Card>

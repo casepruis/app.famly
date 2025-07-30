@@ -44,87 +44,113 @@ export default function Index() {
   const [userEmail, setUserEmail] = useState('');
   const [hasChecked, setHasChecked] = useState(false);
 
+
+
   useEffect(() => {
+    const user = User.login("test@example.com", "test123");
+    console.log("Logged in as:", user);
     // Prevent multiple calls
     if (hasChecked) return;
-
+    
     const checkUserSetup = async () => {
-      // Add a small delay to prevent rapid successive calls
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      try {
-        const user = await User.me();
-        setUserEmail(user.email); // Store original email for display purposes
-        setAuthStatus('authenticated');
+  // Add a small delay to prevent rapid successive calls
+  await new Promise(resolve => setTimeout(resolve, 500));
 
-        if (user && user.family_id) {
-          setStatus('Welcome back! Redirecting...');
-          setTimeout(() => navigate(createPageUrl('Dashboard')), 1000);
-          return;
-        }
+  try {
+    setIsLoggingIn(true); // ✅ Optional: show visual feedback while logging in
 
-        // Apply robust normalization to both platform admin and user emails
-        const normalizedUserEmail = normalizeGoogleEmail(user.email);
-        const normalizedPlatformAdmins = PLATFORM_ADMINS.map(normalizeGoogleEmail);
+    // ✅ Login properly and wait for it to finish
+    const loggedInUser = await User.login("test@example.com", "test123");
+    console.log("Logged in as:", loggedInUser); // ✅ You'll now see the actual user object
 
-        if (!normalizedPlatformAdmins.includes(normalizedUserEmail)) {
-          setStatus('Checking access permissions...');
+    // ✅ Get user from /auth/me
+    const user = await User.me();
+    console.log("User ", user);
 
-          // Use the robustly normalized email for the database query
-          const whitelistEntries = await UserWhitelist.filter({ email: normalizedUserEmail });
-          
-          const hasActiveEntry = whitelistEntries.some(entry => entry.status === 'active');
+    if (!user) {
+      console.log("No user in localStorage — user is not logged in.");
+      setAuthStatus("unauthenticated");
+      setStatus("Welcome! Please log in to continue.");
+      return;
+    }
 
-          if (!hasActiveEntry) {
-            setAuthStatus('not_whitelisted');
-            setStatus('Access denied. This email is not authorized.');
-            return;
-          }
-        }
-        
-        // If no family_id, go to setup page (with delay to prevent loop)
-        setStatus('No family connection found. Redirecting to setup...');
-        setTimeout(() => navigate(createPageUrl('FamilySetup')), 1500);
+    setUserEmail(user.email); // Store original email for display
+    setAuthStatus('authenticated');
 
-      } catch (error) {
-        if (error.response?.status === 401 || error.message.includes('401')) {
-            console.log("Auth check failed, user is not logged in.");
-            setAuthStatus('unauthenticated');
-            setStatus('Welcome! Please log in to continue.');
-        } else if (error.response?.status === 429) {
-            console.log("Rate limited, waiting before retry");
-            setAuthStatus('rate_limited');
-            setStatus('Too many requests. Please wait a moment...');
-            // Wait 5 seconds before retry
-            setTimeout(() => {
-              setHasChecked(false);
-              setAuthStatus('checking');
-              setStatus('Retrying...');
-            }, 5000);
-        } else {
-            console.error("An unexpected error occurred during setup:", error);
-            setAuthStatus('error');
-            setStatus(`An error occurred: ${error.message}`);
-        }
-      } finally {
-        setHasChecked(true);
+    if (user && user.family_id) {
+      setStatus('Welcome back! Redirecting...');
+      setTimeout(() => navigate(createPageUrl('Dashboard')), 1000);
+      return;
+    }
+
+    // Apply robust normalization to both platform admin and user emails
+    const normalizedUserEmail = normalizeGoogleEmail(user.email);
+    const normalizedPlatformAdmins = PLATFORM_ADMINS.map(normalizeGoogleEmail);
+
+    if (!normalizedPlatformAdmins.includes(normalizedUserEmail)) {
+      setStatus('Checking access permissions...');
+
+      const whitelistEntries = await UserWhitelist.filter({ email: normalizedUserEmail });
+
+      const hasActiveEntry = whitelistEntries.some(entry => entry.status === 'active');
+
+      if (!hasActiveEntry) {
+        setAuthStatus('not_whitelisted');
+        setStatus('Access denied. This email is not authorized.');
+        return;
       }
-    };
+    }
+
+    // If no family_id, go to setup page (with delay to prevent loop)
+    setStatus('No family connection found. Redirecting to setup...');
+    setTimeout(() => navigate(createPageUrl('FamilySetup')), 1500);
+
+  } catch (error) {
+    if (error.response?.status === 401 || error.message.includes('401')) {
+        console.log("Auth check failed, user is not logged in.");
+        setAuthStatus('unauthenticated');
+        setStatus('Welcome! Please log in to continue.');
+    } else if (error.response?.status === 429) {
+        console.log("Rate limited, waiting before retry");
+        setAuthStatus('rate_limited');
+        setStatus('Too many requests. Please wait a moment...');
+        setTimeout(() => {
+          setHasChecked(false);
+          setAuthStatus('checking');
+          setStatus('Retrying...');
+        }, 5000);
+    } else {
+        console.error("An unexpected error occurred during setup:", error);
+        setAuthStatus('error');
+        setStatus(`An error occurred: ${error.message}`);
+    }
+  } finally {
+    setIsLoggingIn(false);
+    setHasChecked(true);
+  }
+};
 
     checkUserSetup();
   }, [navigate, hasChecked]);
 
   const handleLogin = async () => {
+    console.log("Start login process");
     setIsLoggingIn(true);
     try {
-      await User.loginWithRedirect(window.location.href);
+      const user = await User.login("test@example.com", "test123");
+      console.log("Logged in as:", user);
+      setAuthStatus("authenticated");
+      setUserEmail(user.email);
+      setStatus("Welcome! Redirecting...");
+      setTimeout(() => navigate(createPageUrl("Dashboard")), 1000);
     } catch (error) {
       console.error("Login Failed:", error);
       toast({
         title: "Login Failed",
-        description: "Could not initiate login. Please try again.",
-        variant: "destructive"
+        description: "Invalid credentials. Please try again.",
+        variant: "destructive",
       });
+    } finally {
       setIsLoggingIn(false);
     }
   };

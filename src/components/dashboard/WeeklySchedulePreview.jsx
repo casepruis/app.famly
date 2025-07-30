@@ -123,10 +123,11 @@ export default function WeeklySchedulePreview({ events, familyMembers }) {
                             {weekDays.map(day => {
                                 const dayKey = format(day, 'yyyy-MM-dd');
                                 const dayEvents = eventsByDay[dayKey] || [];
+                                console.log("Day Events", dayKey, dayEvents.map(e => e.id));
                                 return (
                                     <div key={dayKey} className="border-r border-gray-200 last:border-r-0 p-1 overflow-hidden">
-                                        {dayEvents.map(event => (
-                                            <EventCard key={event.id} event={event} familyMembers={familyMembers} />
+                                        {dayEvents.map((event, idx) => (
+                                            <EventCard key={event.id || `${dayKey}-${idx}`} event={event} familyMembers={familyMembers} />
                                         ))}
                                     </div>
                                 );

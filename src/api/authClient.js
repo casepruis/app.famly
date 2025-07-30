@@ -1,70 +1,60 @@
 // src/api/authClient.js
+const API_BASE = "http://localhost:8000/api";
 
-const API_BASE = 'http://localhost:8000'; // Change to your actual backend URL if needed
-const bypass = true; // 🔁 Toggle between mock and real backend
-
-let currentUser = {
-  email: "test@example.com",
-  full_name: "Demo User",
-  family_id: "family-123",
-  role: "member",
-  notification_settings: {
-    chat_notifications: true,
-    task_reminders: true,
-    event_reminders: true
-  }
+const saveUser = (user, token) => {
+  localStorage.setItem("famlyai_user", JSON.stringify(user));
+  localStorage.setItem("famlyai_token", token);
 };
 
-async function backendLogin(email, password) {
-  const response = await fetch(`${API_BASE}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!response.ok) throw new Error('Login failed');
-  currentUser = await response.json();
-  return currentUser;
-}
+const getToken = () => localStorage.getItem("famlyai_token");
 
-async function backendLogout() {
-  // Optionally implement session/token revocation later
-  currentUser = null;
-}
-
-async function backendGetCurrentUser() {
-  return currentUser;
-}
-
-async function bypassLogin(email, password) {
-  currentUser = {
-    email,
-    full_name: "Demo User",
-    role: "member",
-    family_id: "family-001",
-    push_subscription: null,
-    notification_settings: {
-      chat_notifications: true,
-      task_reminders: true,
-      event_reminders: true,
-    },
-  };
-  console.log("✅ Bypass login active:", currentUser);
-  return currentUser;
-}
-
-async function bypassLogout() {
-  console.log("✅ Bypass logout");
-  currentUser = null;
-}
-
-async function bypassGetCurrentUser() {
-  return currentUser;
-}
+const getCurrentUser = () => {
+  const stored = localStorage.getItem("famlyai_user");
+  return stored ? JSON.parse(stored) : null;
+};
 
 export const authClient = {
-  login: bypass ? bypassLogin : backendLogin,
-  logout: bypass ? bypassLogout : backendLogout,
-  getCurrentUser: bypass ? bypassGetCurrentUser : backendGetCurrentUser,
-  isLoggedIn: () => !!currentUser,
-  me: async () => currentUser  // 👈 This line mimics Base44 SDK
+  // Note: The URL has been updated to match your backend route (/api/auth/login)
+  login: async (email, password) => {
+    const response = await fetch(`${API_BASE}/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        username: email,
+        password,
+      }),
+    });
+
+    if (!response.ok) throw new Error("Login failed");
+
+    const { access_token } = await response.json();
+    if (!access_token) throw new Error("No access token received");
+
+    // ✅ Save token
+    localStorage.setItem("famlyai_token", access_token);
+
+    // ✅ Get user info
+    const userRes = await fetch(`${API_BASE}/auth/me`, {
+      headers: { Authorization: `Bearer ${access_token}` },
+    });
+    const user = await userRes.json();
+
+    // ✅ Save user
+    localStorage.setItem("famlyai_user", JSON.stringify(user));
+
+    return user;
+  },
+
+
+  logout: () => {
+    localStorage.removeItem("famlyai_user");
+    localStorage.removeItem("famlyai_token");
+  },
+
+  me: async () => getCurrentUser(),
+  getCurrentUser,
+  isLoggedIn: () => !!getToken(),
+  getToken,
 };

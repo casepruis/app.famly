@@ -1,22 +1,24 @@
-import { base44 } from './base44Client';
+export const InvokeLLM = async () => {
+  console.log("🧪 InvokeLLM() called (stub)");
+  return null;
+};
 
+export const SendEmail = async () => {
+  console.log("🧪 SendEmail() called (stub)");
+  return null;
+};
 
+export const UploadFile = async () => {
+  console.log("🧪 UploadFile() called (stub)");
+  return null;
+};
 
+export const GenerateImage = async () => {
+  console.log("🧪 GenerateImage() called (stub)");
+  return null;
+};
 
-export const Core = base44.integrations.Core;
-
-export const InvokeLLM = base44.integrations.Core.InvokeLLM;
-
-export const SendEmail = base44.integrations.Core.SendEmail;
-
-export const UploadFile = base44.integrations.Core.UploadFile;
-
-export const GenerateImage = base44.integrations.Core.GenerateImage;
-
-export const ExtractDataFromUploadedFile = base44.integrations.Core.ExtractDataFromUploadedFile;
-
-
-
-
-
-
+export const ExtractDataFromUploadedFile = async () => {
+  console.log("🧪 ExtractDataFromUploadedFile() called (stub)");
+  return null;
+};
