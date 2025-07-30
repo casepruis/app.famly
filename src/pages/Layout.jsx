@@ -300,6 +300,8 @@ function LayoutContent({ children, currentPageName }) {
     return () => clearTimeout(timeoutId);
   }, [loadData, location.pathname]);
 
+  
+
   const staticNavItems = useMemo(() => [
     { title: t('dashboard') || 'Dashboard', url: createPageUrl("Dashboard"), icon: Home, id: 'sidebar-dashboard' },
     { title: t('schedule') || 'Schedule', url: createPageUrl("Schedule"), icon: Calendar, id: 'sidebar-schedule' },
@@ -363,6 +365,12 @@ function LayoutContent({ children, currentPageName }) {
     );
   }
 
+  
+  console.log("🧪 Header visibility check", {
+    currentUser,
+    showHeaderActions,
+    currentPageName,
+  });
   return (
     <SidebarProvider>
       <style>
@@ -530,6 +538,8 @@ function LayoutContent({ children, currentPageName }) {
             {children}
           </div>
         </main>
+
+        
       </div>
     </SidebarProvider>
   );

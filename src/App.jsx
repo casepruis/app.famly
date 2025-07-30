@@ -2,7 +2,7 @@ import './App.css';
 import { Routes, Route } from 'react-router-dom';
 import { Toaster } from '@/components/ui/toaster';
 import { LanguageProvider } from '@/components/common/LanguageProvider';
-import Layout from '@/pages/Layout';
+import PageWithLayout from '@/pages/PageWithLayout'; // new helper component
 
 import Index from '@/pages/Index';
 import Dashboard from '@/pages/Dashboard';
@@ -25,22 +25,22 @@ function App() {
   return (
     <LanguageProvider>
       <Routes>
-        <Route path="/" element={<Layout><Index /></Layout>} />
-        <Route path="/dashboard" element={<Layout><Dashboard /></Layout>} />
-        <Route path="/familysetup" element={<Layout><FamilySetup /></Layout>} />
-        <Route path="/schedule" element={<Layout><Schedule /></Layout>} />
-        <Route path="/tasks" element={<Layout><Tasks /></Layout>} />
-        <Route path="/events" element={<Layout><Events /></Layout>} />
-        <Route path="/wishlist" element={<Layout><Wishlist /></Layout>} />
-        <Route path="/familymembers" element={<Layout><FamilyMembers /></Layout>} />
-        <Route path="/connectors" element={<Layout><Connectors /></Layout>} />
-        <Route path="/chat" element={<Layout><Chat /></Layout>} />
-        <Route path="/aiassistant" element={<Layout><AIAssistant /></Layout>} />
-        <Route path="/debug" element={<Layout><Debug /></Layout>} />
-        <Route path="/admin" element={<Layout><Admin /></Layout>} />
-        <Route path="/platformadmin" element={<Layout><PlatformAdmin /></Layout>} />
-        <Route path="/datacleanup" element={<Layout><DataCleanup /></Layout>} />
-        <Route path="/databaserecovery" element={<Layout><DatabaseRecovery /></Layout>} />
+        <Route path="/" element={<PageWithLayout><Index /></PageWithLayout>} />
+        <Route path="/dashboard" element={<PageWithLayout><Dashboard /></PageWithLayout>} />
+        <Route path="/familysetup" element={<PageWithLayout><FamilySetup /></PageWithLayout>} />
+        <Route path="/schedule" element={<PageWithLayout><Schedule /></PageWithLayout>} />
+        <Route path="/tasks" element={<PageWithLayout><Tasks /></PageWithLayout>} />
+        <Route path="/events" element={<PageWithLayout><Events /></PageWithLayout>} />
+        <Route path="/wishlist" element={<PageWithLayout><Wishlist /></PageWithLayout>} />
+        <Route path="/familymembers" element={<PageWithLayout><FamilyMembers /></PageWithLayout>} />
+        <Route path="/connectors" element={<PageWithLayout><Connectors /></PageWithLayout>} />
+        <Route path="/chat" element={<PageWithLayout><Chat /></PageWithLayout>} />
+        <Route path="/aiassistant" element={<PageWithLayout><AIAssistant /></PageWithLayout>} />
+        <Route path="/debug" element={<PageWithLayout><Debug /></PageWithLayout>} />
+        <Route path="/admin" element={<PageWithLayout><Admin /></PageWithLayout>} />
+        <Route path="/platformadmin" element={<PageWithLayout><PlatformAdmin /></PageWithLayout>} />
+        <Route path="/datacleanup" element={<PageWithLayout><DataCleanup /></PageWithLayout>} />
+        <Route path="/databaserecovery" element={<PageWithLayout><DatabaseRecovery /></PageWithLayout>} />
       </Routes>
       <Toaster />
     </LanguageProvider>
