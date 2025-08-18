@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { SidebarProvider, Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger } from "@/components/ui/sidebar";
-import { Home, Calendar, CheckSquare, Users, Settings, LogOut, User as UserIcon, HardDrive, Plus, Rocket, Gift, ChevronDown, ChevronRight, MessageSquare, Zap, Bot, List } from "lucide-react";
+import { Home, Calendar, CheckSquare, Users, Settings, LogOut, User as UserIcon, HardDrive, Plus, Rocket, Gift, ChevronDown, ChevronLeft, ChevronRight, MessageSquare, Zap, Bot, List } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { LanguageProvider, useLanguage } from "@/components/common/LanguageProvider";
@@ -13,6 +13,7 @@ import { getLanguageInfo } from "@/components/common/translations";
 import { User, FamilyMember, Family, Conversation, ChatMessage } from "@/api/entities"; // Added ChatMessage
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/use-toast";
+
 
 
 // Hardcoded list of platform administrators
@@ -104,50 +105,72 @@ function LayoutContent({ children, currentPageName }) {
   const [conversations, setConversations] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isChatExpanded, setIsChatExpanded] = useState(true);
+  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [notificationCounts, setNotificationCounts] = useState({});
   const lastMessageIdsRef = useRef({}); // Ref to track last message IDs for all convos
-  const pollingIntervalRef = useRef(null); // Ref to hold the interval ID
+  // const pollingIntervalRef = useRef(null); // Ref to hold the interval ID
 
   // Function to handle showing notifications
   const showNotification = useCallback((conversationId, conversationName, senderName, messageContent) => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const activeChatId = urlParams.get('id');
-      const currentPath = window.location.pathname.split('/').pop();
+  const urlParams = new URLSearchParams(window.location.search);
+  const activeChatId = urlParams.get('id');
+  const currentPath = window.location.pathname.split('/').pop();
 
-      // Suppress notifications if user is already viewing the specific chat
-      if (currentPath === 'Chat' && activeChatId === conversationId) {
-          console.log(`🚫 Notification for ${conversationName} suppressed: user is viewing this chat.`);
-          return;
-      }
+  // Suppress if user is already viewing this chat
+  if (currentPath === 'Chat' && activeChatId === conversationId) {
+    console.log(`🚫 Notification for ${conversationName} suppressed: user is viewing this chat.`);
+    return;
+  }
 
-      console.log(`✅ Displaying notification for a message in ${conversationName}.`);
+  console.log(`✅ Displaying notification for a message in ${conversationName}.`);
 
-      // Update UI badge count
+  // Update UI badge count immediately
+  setNotificationCounts(prev => ({
+    ...prev,
+    [conversationId]: (prev[conversationId] || 0) + 1,
+  }));
+
+  // Browser notification (auto-close after 5s)
+  let notification;
+  if ('Notification' in window && Notification.permission === 'granted') {
+    notification = new Notification(`${senderName} in ${conversationName}`, {
+      body: messageContent.substring(0, 100),
+      icon: 'https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/52181febd_Screenshot_20250703_092323_Chrome.jpg',
+      tag: conversationId,
+    });
+    notification.onclick = () => {
+      navigate(createPageUrl('Chat') + `?id=${conversationId}`);
+      window.focus();
+    };
+    // 🔔 auto-close
+    setTimeout(() => {
+      try { notification?.close?.(); } catch {}
+    }, 5000);
+  }
+
+  // In-app toast (already auto-dismisses via duration)
+  toast({
+    title: `${senderName} in ${conversationName}`,
+    description: messageContent.substring(0, 50) + (messageContent.length > 50 ? '...' : ''),
+    duration: 5000,
+  });
+
+  // 🔵 Auto-clear sidebar badge after 5s unless user opened the chat
+  setTimeout(() => {
+    const nowParams = new URLSearchParams(window.location.search);
+    const nowActive = nowParams.get('id');
+    const nowPath = window.location.pathname.split('/').pop();
+
+    // If the chat was opened meanwhile, don't force-clear (it will clear via famly-chat-read)
+    if (!(nowPath === 'Chat' && nowActive === conversationId)) {
       setNotificationCounts(prev => ({
-          ...prev,
-          [conversationId]: (prev[conversationId] || 0) + 1,
+        ...prev,
+        [conversationId]: 0
       }));
-      
-      // Show browser notification
-      if ('Notification' in window && Notification.permission === 'granted') {
-          const notification = new Notification(`${senderName} in ${conversationName}`, {
-              body: messageContent.substring(0, 100),
-              icon: 'https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/52181febd_Screenshot_20250703_092323_Chrome.jpg',
-              tag: conversationId,
-          });
-          notification.onclick = () => {
-              navigate(createPageUrl('Chat') + `?id=${conversationId}`);
-              window.focus();
-          };
-      }
-      
-      // Show in-app toast notification
-      toast({
-          title: `${senderName} in ${conversationName}`,
-          description: messageContent.substring(0, 50) + (messageContent.length > 50 ? '...' : ''),
-          duration: 5000,
-      });
-  }, [navigate, toast]); // Added navigate and toast to dependencies for useCallback
+    }
+  }, 5000);
+}, [navigate, toast]);
+ // Added navigate and toast to dependencies for useCallback
 
   useEffect(() => {
     // Request notification permission on app load
@@ -171,22 +194,22 @@ function LayoutContent({ children, currentPageName }) {
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const user = await User.me();
-      setCurrentUser(user);
+      const authUser = await User.me();           
+      setCurrentUser(authUser);
 
-      if (user?.family_id) {
+
+      if (authUser?.family_id) {
         const [familyData, convosData] = await Promise.all([
-          Family.get(user.family_id).catch(() => null),
-          Conversation.filter({ family_id: user.family_id }, '-last_message_timestamp').catch(() => []),
+          Family.get(authUser.family_id).catch(() => null),
+          Conversation.filter({ family_id: authUser.family_id }, '-last_message_timestamp').catch(() => []),
         ]);
+        console.log("🗂️ Loaded conversations:", convosData);
         setFamily(familyData);
         setConversations(convosData);
 
-        // Fetch the current user's FamilyMember record within the context of their family
-        // This assumes FamilyMember has a user_id property that links to User.id
-        const memberForCurrentUser = await FamilyMember.filter({ user_id: user.id, family_id: user.family_id }, null, 1);
-        setCurrentFamilyMember(memberForCurrentUser[0] || null);
-
+        // New: call /family-members/me → returns FamilyMember
+        const meAsMember = await FamilyMember.me();
+        setCurrentFamilyMember(meAsMember || null);
 
         // Initialize last message IDs for polling
         if (convosData.length > 0) {
@@ -211,87 +234,138 @@ function LayoutContent({ children, currentPageName }) {
   }, []);
 
   // Start polling when component is ready and has conversations
-  useEffect(() => {
-    // Only poll if not loading, user exists, and there are conversations
-    if (isLoading || !currentUser || conversations.length === 0) {
-      // Clear interval if conditions are not met to prevent unnecessary polling
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        pollingIntervalRef.current = null;
-        console.log("🧹 Polling paused due to missing data or loading state.");
-      }
-      return;
-    }
+  // useEffect(() => {
+  //   // Only poll if not loading, user exists, and there are conversations
+  //   if (isLoading || !currentUser || conversations.length === 0) {
+  //     // Clear interval if conditions are not met to prevent unnecessary polling
+  //     if (pollingIntervalRef.current) {
+  //       clearInterval(pollingIntervalRef.current);
+  //       pollingIntervalRef.current = null;
+  //       console.log("🧹 Polling paused due to missing data or loading state.");
+  //     }
+  //     return;
+  //   }
 
-    const poll = async () => {
-      console.log("🔄 Polling for new messages...");
+  //   const poll = async () => {
+  //     console.log("🔄 Polling for new messages...");
       
-      try {
-        // Fetch members only once and cache them for this polling cycle
-        const members = await FamilyMember.filter({ family_id: currentUser.family_id });
-        // Find the current user's member record to properly check if they sent the message
-        const currentUserMember = members.find(m => m.user_id === currentUser.id);
+  //     try {
+  //       // Fetch members only once and cache them for this polling cycle
+  //       const members = await FamilyMember.filter({ family_id: currentUser.family_id });
+  //       // Find the current user's member record to properly check if they sent the message
+  //       const currentUserMember = members.find(m => m.user_id === currentUser.id);
 
-        for (const convo of conversations) {
-          try {
-            const latestMsgArr = await ChatMessage.filter({ conversation_id: convo.id }, '-created_date', 1);
-            if (latestMsgArr && latestMsgArr.length > 0) {
-              const latestMsg = latestMsgArr[0];
-              const lastKnownId = lastMessageIdsRef.current[convo.id];
+  //       for (const convo of conversations) {
+  //         try {
+  //           const latestMsgArr = await ChatMessage.filter({ conversation_id: convo.id }, '-created_date', 1);
+  //           if (latestMsgArr && latestMsgArr.length > 0) {
+  //             const latestMsg = latestMsgArr[0];
+  //             const lastKnownId = lastMessageIdsRef.current[convo.id];
 
-              if (latestMsg.id !== lastKnownId) {
-                console.log(`🆕 New message found in "${convo.name}"! Dispatching event.`);
+  //             if (latestMsg.id !== lastKnownId) {
+  //               console.log(`🆕 New message found in "${convo.name}"! Dispatching event.`);
                 
-                // Dispatch a global event that the active ChatWindow can listen to
-                window.dispatchEvent(new CustomEvent('famly-new-chat-message', { detail: { message: latestMsg } }));
+  //               // Dispatch a global event that the active ChatWindow can listen to
+  //               window.dispatchEvent(new CustomEvent('famly-new-chat-message', { detail: { message: latestMsg } }));
                 
-                // Handle notifications if the message is not from the current user
-                if (latestMsg.sender_id !== currentUserMember?.id) { 
-                    const sender = members.find(m => m.id === latestMsg.sender_id);
-                    showNotification(convo.id, convo.name, sender?.name || 'Someone', latestMsg.content);
-                }
+  //               // Handle notifications if the message is not from the current user
+  //               if (latestMsg.sender_id !== currentUserMember?.id) { 
+  //                   const sender = members.find(m => m.id === latestMsg.sender_id);
+  //                   showNotification(convo.id, convo.name, sender?.name || 'Someone', latestMsg.content);
+  //               }
                 
-                // Update the ref with the new latest ID
-                lastMessageIdsRef.current = {
-                    ...lastMessageIdsRef.current,
-                    [convo.id]: latestMsg.id
-                };
-              }
-            }
-          } catch (conversationError) {
-            // Skip this conversation if there's an error, continue with others
-            console.error(`Error polling conversation ${convo.id}:`, conversationError);
-          }
-        }
-      } catch (error) {
-        console.error("Error during polling:", error);
+  //               // Update the ref with the new latest ID
+  //               lastMessageIdsRef.current = {
+  //                   ...lastMessageIdsRef.current,
+  //                   [convo.id]: latestMsg.id
+  //               };
+  //             }
+  //           }
+  //         } catch (conversationError) {
+  //           // Skip this conversation if there's an error, continue with others
+  //           console.error(`Error polling conversation ${convo.id}:`, conversationError);
+  //         }
+  //       }
+  //     } catch (error) {
+  //       console.error("Error during polling:", error);
         
-        // If we hit a rate limit, slow down the polling
-        if (error.response?.status === 429) {
-          console.log("⏰ Rate limit hit, extending polling interval");
-          if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
-            // Restart with longer interval
-            pollingIntervalRef.current = setInterval(poll, 15000); // 15 seconds instead of 7
-          }
+  //       // If we hit a rate limit, slow down the polling
+  //       if (error.response?.status === 429) {
+  //         console.log("⏰ Rate limit hit, extending polling interval");
+  //         if (pollingIntervalRef.current) {
+  //           clearInterval(pollingIntervalRef.current);
+  //           // Restart with longer interval
+  //           pollingIntervalRef.current = setInterval(poll, 15000); // 15 seconds instead of 7
+  //         }
+  //       }
+  //     }
+  //   };
+
+  //   // Clear any existing interval before setting a new one
+  //   if (pollingIntervalRef.current) {
+  //     clearInterval(pollingIntervalRef.current);
+  //   }
+  //   pollingIntervalRef.current = setInterval(poll, 10000); // Start with 10 seconds instead of 7
+
+  //   // Cleanup function
+  //   return () => {
+  //     if (pollingIntervalRef.current) {
+  //       clearInterval(pollingIntervalRef.current);
+  //       console.log("🧹 Polling stopped.");
+  //     }
+  //   };
+  // }, [isLoading, currentUser, conversations, navigate, toast, showNotification]);
+
+  useEffect(() => {
+    if (!currentUser || !family || !currentFamilyMember) return;
+
+    const token = localStorage.getItem("famlyai_token");
+    if (!token) return;
+
+    const ws = new WebSocket(`ws://localhost:8000/ws?token=${token}`);
+
+    ws.onopen = () => {
+      console.log("📡 Layout WebSocket connected");
+    };
+
+    ws.onmessage = async (event) => {
+      try {
+        const { type, payload } = JSON.parse(event.data);
+
+        if (type === "chat_message_created") {
+          const message = payload;
+
+          if (message.sender_id === currentFamilyMember.id) return;
+
+          const convo = conversations.find(c => c.id === message.conversation_id);
+          if (!convo) return;
+
+          const sender = await FamilyMember.get(message.sender_id);
+
+          // 🔔 Show notifications (same as your `showNotification()` logic)
+          showNotification(
+            message.conversation_id,
+            convo.name,
+            sender?.name || "Unknown",
+            message.content
+          );
+
+          // 🔵 Update sidebar badge
+          setNotificationCounts(prev => ({
+            ...prev,
+            [message.conversation_id]: (prev[message.conversation_id] || 0) + 1
+          }));
         }
+      } catch (err) {
+        console.error("WebSocket message error in Layout:", err);
       }
     };
 
-    // Clear any existing interval before setting a new one
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-    }
-    pollingIntervalRef.current = setInterval(poll, 10000); // Start with 10 seconds instead of 7
+    ws.onerror = (err) => console.error("Layout WebSocket error:", err);
+    ws.onclose = () => console.warn("Layout WebSocket closed");
 
-    // Cleanup function
-    return () => {
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-        console.log("🧹 Polling stopped.");
-      }
-    };
-  }, [isLoading, currentUser, conversations, navigate, toast, showNotification]);
+    return () => ws.close();
+  }, [currentUser, family, currentFamilyMember, conversations, showNotification]);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
@@ -300,7 +374,19 @@ function LayoutContent({ children, currentPageName }) {
     return () => clearTimeout(timeoutId);
   }, [loadData, location.pathname]);
 
-  
+  useEffect(() => {
+      const handleChatRead = (event) => {
+          const { conversationId } = event.detail;
+          setNotificationCounts(prev => ({
+              ...prev,
+              [conversationId]: 0
+          }));
+      };
+
+      window.addEventListener('famly-chat-read', handleChatRead);
+      return () => window.removeEventListener('famly-chat-read', handleChatRead);
+  }, []);
+
 
   const staticNavItems = useMemo(() => [
     { title: t('dashboard') || 'Dashboard', url: createPageUrl("Dashboard"), icon: Home, id: 'sidebar-dashboard' },
@@ -315,7 +401,7 @@ function LayoutContent({ children, currentPageName }) {
       items.push({ title: t('admin') || 'Admin', url: createPageUrl("Admin"), icon: Settings });
     }
     // Explicitly check for the platform admin email
-    if (currentUser && PLATFORM_ADMINS.includes(currentUser.email)) {
+    if (currentUser && PLATFORM_ADMINS.includes(currentUser.user_id)) {
       items.push({ title: 'Platform Admin', url: createPageUrl("PlatformAdmin"), icon: HardDrive });
     }
     return items;
@@ -330,7 +416,7 @@ function LayoutContent({ children, currentPageName }) {
   };
 
   const showHeaderActions = useMemo(() => {
-    return ['Dashboard', 'Schedule', 'Tasks', 'FamilyMembers', 'Admin', 'PlatformAdmin', 'Connectors', 'Events'].includes(currentPageName);
+    return ['Dashboard', 'Schedule', 'Tasks', 'FamilyMembers', 'Admin', 'PlatformAdmin', 'Connectors', 'Events','Chat'].includes(currentPageName);
   }, [currentPageName]);
 
   const showAddAction = useMemo(() => {
@@ -348,13 +434,13 @@ function LayoutContent({ children, currentPageName }) {
   }
 
   // Special layout for the Chat page to be full-screen
-  if (currentPageName === 'Chat') {
-    return (
-      <div className="h-screen w-screen flex bg-white">
-        {children}
-      </div>
-    );
-  }
+  // if (currentPageName === 'Chat') {
+  //   return (
+  //     <div className="h-screen w-screen flex bg-white">
+  //       {children}
+  //     </div>
+  //   );
+  // }
 
   // Special layout for Debug page to be simple
   if (currentPageName === 'Debug') {
@@ -386,7 +472,7 @@ function LayoutContent({ children, currentPageName }) {
         `}
       </style>
       <div className="min-h-screen flex w-full" style={{backgroundColor: 'var(--famly-bg)'}}>
-        {currentUser && (
+        {isSidebarVisible && currentUser && (
           <Sidebar className="border-r bg-white" style={{borderColor: 'var(--famly-accent)'}}>
             <SidebarHeader className="p-4 border-b" style={{borderColor: 'var(--famly-accent)'}}>
               <div className="flex items-center gap-3">
@@ -516,6 +602,16 @@ function LayoutContent({ children, currentPageName }) {
             <header className="flex-shrink-0 flex items-center justify-between p-4 bg-white border-b" style={{borderColor: 'var(--famly-accent)'}}>
               <div className="flex items-center gap-4">
                 <SidebarTrigger className="lg:hidden" />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsSidebarVisible(prev => !prev)}
+                  className="text-gray-500 hover:text-gray-700"
+                  title={isSidebarVisible ? 'Hide sidebar' : 'Show sidebar'}
+                >
+                  {isSidebarVisible ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                </Button>
+
                 <h1 className="text-xl font-bold text-gray-900 capitalize">
                   {t(currentPageName?.charAt(0).toLowerCase() + currentPageName?.slice(1)) || currentPageName}
                 </h1>

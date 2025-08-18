@@ -58,7 +58,7 @@ export default function PlatformAdmin() {
       try {
         const user = await User.me();
         // Check if the current user's email is in the list of PLATFORM_ADMINS
-        if (!user || !PLATFORM_ADMINS.includes(user.email)) {
+        if (!user || !PLATFORM_ADMINS.includes(user.user_id)) {
           // If not an admin, redirect to the Dashboard
           toast({
             title: t('accessDenied') || 'Access Denied',
@@ -131,7 +131,7 @@ export default function PlatformAdmin() {
       const currentUser = await User.me();
       await UserWhitelist.create({
         email: newUserEmail.toLowerCase(), // Normalize email
-        added_by: currentUser.email,
+        added_by: currentuser.user_id,
         notes: newUserNotes || null,
         status: 'active'
       });
@@ -434,7 +434,7 @@ export default function PlatformAdmin() {
                   whitelistedUsers.map((user) => (
                     <div key={user.id} className="flex items-center justify-between py-3 px-4 bg-gray-50 rounded-lg">
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-gray-900 truncate">{user.email}</p>
+                        <p className="font-medium text-gray-900 truncate">{user.user_id}</p>
                         <div className="flex items-center gap-2 mt-1">
                           <p className="text-sm text-gray-500">Added by {user.added_by}</p>
                           <Badge variant={user.status === 'active' ? 'default' : 'secondary'}>

@@ -47,7 +47,7 @@ export default function FamilySetup() {
 
         // --- INVITATION CONNECTION LOGIC ---
         // Check if the user was invited to an existing family.
-        const pendingMembers = await FamilyMember.filter({ pending_user_email: currentUser.email });
+        const pendingMembers = await FamilyMember.filter({ pending_user_email: currentuser.user_id });
         
         if (pendingMembers.length > 0) {
           const memberProfile = pendingMembers[0];
@@ -142,7 +142,7 @@ export default function FamilySetup() {
         // Create family with unique constraint checking
         const newFamily = await Family.create({
             ...familyData,
-            created_by: user.email // Add creator tracking
+            created_by: user.user_id // Add creator tracking
         });
         console.log("Family created:", newFamily);
         

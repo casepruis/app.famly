@@ -60,6 +60,7 @@ const translations = {
     weekly: 'Weekly',
     byMember: 'By member',
     today: 'Today',
+    todaysEvents: 'Events of the day',
     filterByCategory: 'Filter by category',
     filterByDate: 'Filter by date',
     holiday: 'Holiday',
@@ -251,8 +252,7 @@ const translations = {
     couldNotDeleteMember: 'Could not delete member',
     couldNotSaveMember: 'Could not save member',
     save: 'Save',
-    cancel: 'Cancel',
-    
+       
     // Admin translations
     members: 'Members',
     invitations: 'Invitations',
@@ -537,7 +537,6 @@ const translations = {
     couldNotDeleteMember: 'Kon lid niet verwijderen',
     couldNotSaveMember: 'Kon lid niet opslaan',
     save: 'Opslaan',
-    cancel: 'Annuleren',
     
     // Admin translations
     members: 'Leden',

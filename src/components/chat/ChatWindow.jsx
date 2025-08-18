@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { User, FamilyMember, ChatMessage, Conversation, Task, ScheduleEvent, WishlistItem } from '@/api/entities';
 import { Button } from "@/components/ui/button";
@@ -9,410 +8,621 @@ import { useToast } from "@/components/ui/use-toast";
 import { InvokeLLM } from '@/api/integrations';
 import TasksReviewer from './TasksReviewer';
 import VacationEventsReview from './VacationEventsReview';
+import { Check } from "lucide-react";
 
-export default function ChatWindow({ conversationId }) {
-    const [messages, setMessages] = useState([]);
-    const [familyMembers, setFamilyMembers] = useState([]);
-    const [currentUserMember, setCurrentUserMember] = useState(null);
-    const [aiAssistant, setAiAssistant] = useState(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [inputValue, setInputValue] = useState('');
-    const [isSending, setIsSending] = useState(false);
-    const [isAiProcessing, setIsAiProcessing] = useState(false);
-    const [pendingAction, setPendingAction] = useState(null);
-    const messagesEndRef = useRef(null);
-    const { toast } = useToast();
+export default function ChatWindow({ conversationId, participants }) {
+  const [messages, setMessages] = useState([]);
+  const [familyMembers, setFamilyMembers] = useState([]);
+  const [currentUserMember, setCurrentUserMember] = useState(null);
+  const [aiAssistant, setAiAssistant] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [inputValue, setInputValue] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const [isAiProcessing, setIsAiProcessing] = useState(false);
+  const [pendingAction, setPendingAction] = useState(null);
+  const messagesEndRef = useRef(null);
+  const { toast } = useToast();
+  const hasSentIntroRef = useRef(false);
 
-    const createAIAssistant = async (familyId) => {
-        try {
-            const aiMember = await FamilyMember.create({
-                name: "AI Assistent", role: "ai_assistant", family_id: familyId, color: "#10b981", language: "nl"
-            });
-            return aiMember;
-        } catch (error) { 
-            console.error("Failed to create AI assistant:", error); 
-            return null; 
+  const createAIAssistant = async (familyId) => {
+    try {
+      const aiMember = await FamilyMember.create({
+        name: "AI Assistent", role: "ai_assistant", family_id: familyId, color: "#10b981", language: "nl"
+      });
+      return aiMember;
+    } catch (error) {
+      console.error("Failed to create AI assistant:", error);
+      return null;
+    }
+  };
+
+  const introduceAI = async (aiMember, convoId) => {
+    const welcomeMessage = "🤖 Hoi! Ik ben jullie AI-assistent. Klik op de ✨ knop rechtsonder als je wilt dat ik meedenk of een actie voorstel op basis van het gesprek!";
+    try {
+      await ChatMessage.create({
+        conversation_id: convoId,
+        sender_id: aiMember.id,
+        content: welcomeMessage,
+        message_type: 'ai_introduction',
+        read_by: [aiMember.id],
+      });
+      await Conversation.update(convoId, {
+        last_message_preview: "AI assistent heeft zich aangesloten.",
+        last_message_timestamp: new Date().toISOString()
+      });
+      return true;
+    } catch (error) {
+      console.error("Failed to introduce AI:", error);
+      return false;
+    }
+  };
+
+  // Load initial data
+  useEffect(() => {
+    const loadChatData = async () => {
+      if (!conversationId) return;
+      setIsLoading(true);
+      setPendingAction(null);
+
+      try {
+        const user = await User.me();
+        let members = await FamilyMember.list();
+
+        // 🔁 SLIPPED-IN: get the authoritative current FamilyMember from backend
+        const meAsMember = await FamilyMember.me();
+        setCurrentUserMember(meAsMember);
+
+        // Ensure AI member exists
+        let aiMember = members.find(m => m.role === 'ai_assistant');
+        if (!aiMember && user.family_id) {
+          aiMember = await createAIAssistant(user.family_id);
+          if (aiMember) {
+            members = await FamilyMember.list(); // refresh
+          }
         }
-    };
+        setAiAssistant(aiMember);
+        setFamilyMembers(members);
 
-    const introduceAI = async (aiMember, convoId) => {
-        const welcomeMessage = "🤖 Hoi! Ik ben jullie AI-assistent. Klik op de ✨ knop rechtsonder als je wilt dat ik meedenk of een actie voorstel op basis van het gesprek!";
-        try {
-            await ChatMessage.create({
-                conversation_id: convoId, 
-                sender_id: aiMember.id, 
-                content: welcomeMessage, 
-                message_type: 'ai_introduction'
-            });
-            await Conversation.update(convoId, {
-                last_message_preview: "AI assistent heeft zich aangesloten.", 
-                last_message_timestamp: new Date().toISOString()
-            });
-            return true;
-        } catch (error) { 
-            console.error("Failed to introduce AI:", error); 
-            return false; 
-        }
-    };
+        // Messages & AI intro
+        let initialMessages = await ChatMessage.filter({ conversation_id: conversationId }, 'created_date');
 
-    useEffect(() => {
-        const loadChatData = async () => {
-            if (!conversationId) return;
-            setIsLoading(true);
-            setPendingAction(null);
-            
-            try {
-                const user = await User.me();
-                let members = await FamilyMember.list();
-                const userMember = members.find(m => m.user_id === user.id);
-                setCurrentUserMember(userMember);
-
-                // --- Robust AI Member Handling ---
-                let aiMember = members.find(m => m.role === 'ai_assistant');
-                if (!aiMember && user.family_id) {
-                    aiMember = await createAIAssistant(user.family_id);
-                    if (aiMember) {
-                        members = await FamilyMember.list(); // Refresh members list
-                    }
-                }
-                setAiAssistant(aiMember);
-                setFamilyMembers(members);
-
-                // --- Load Messages & Ensure AI Introduction ---
-                let initialMessages = await ChatMessage.filter({ conversation_id: conversationId }, 'created_date');
-                
-                if (aiMember) {
-                    const hasIntro = initialMessages.some(m => m.sender_id === aiMember.id && m.message_type === 'ai_introduction');
-                    if (!hasIntro) {
-                        await introduceAI(aiMember, conversationId);
-                        initialMessages = await ChatMessage.filter({ conversation_id: conversationId }, 'created_date'); // Reload to include intro
-                    }
-                }
-                
-                setMessages(initialMessages || []);
-                window.dispatchEvent(new CustomEvent('famly-chat-opened', { detail: { conversationId } }));
-
-            } catch (error) {
-                console.error("Chat initialization error:", error);
-                toast({ title: "Chat Error", description: "Could not initialize chat", variant: "destructive" });
-            } finally {
-                setIsLoading(false);
+        if (aiMember && !hasSentIntroRef.current) {
+          const hasIntro = initialMessages.some(m => m.sender_id === aiMember.id && m.message_type === 'ai_introduction');
+          if (!hasIntro) {
+            const introduced = await introduceAI(aiMember, conversationId);
+            if (introduced) {
+              hasSentIntroRef.current = true;
+              initialMessages = await ChatMessage.filter({ conversation_id: conversationId }, 'created_date');
             }
-        };
-        
-        loadChatData();
-        
-        const handleNewMessage = (event) => {
-            const { message } = event.detail;
-            if (message.conversation_id === conversationId) {
-                setMessages(prev => [...prev, message]);
-            }
-        };
-
-        window.addEventListener('famly-new-chat-message', handleNewMessage);
-        return () => window.removeEventListener('famly-new-chat-message', handleNewMessage);
-    }, [conversationId]);
-    
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, isAiProcessing, pendingAction]);
-
-    const handleSendMessage = async () => {
-        if (!inputValue.trim() || isSending || !currentUserMember) return;
-        setIsSending(true);
-        const content = inputValue.trim();
-        setInputValue('');
-
-        try {
-            // Create the message in the database
-            const newMessage = await ChatMessage.create({
-                conversation_id: conversationId, 
-                sender_id: currentUserMember.id, 
-                content,
-            });
-            
-            // Update conversation timestamp
-            await Conversation.update(conversationId, {
-                last_message_preview: content, 
-                last_message_timestamp: new Date().toISOString()
-            });
-            
-            // Add message to local state immediately
-            setMessages(prev => [...prev, newMessage]);
-            
-        } catch (error) {
-            console.error("Error sending message:", error);
-            setInputValue(content); // Restore input for retry
-            toast({ title: "Send Failed", variant: "destructive" });
-        } finally {
-            setIsSending(false);
+          } else {
+            hasSentIntroRef.current = true;
+          }
         }
+
+        // de-dupe AI intro
+        const unique = [];
+        const seenIntro = new Set();
+        for (const msg of initialMessages) {
+          const isIntro = msg.message_type === 'ai_introduction';
+          const key = isIntro ? `${msg.sender_id}-${msg.message_type}` : msg.id;
+          if (!seenIntro.has(key)) {
+            seenIntro.add(key);
+            unique.push(msg);
+          }
+        }
+
+        // keep stable order (oldest→newest)
+        unique.sort((a, b) => new Date(a.created_date) - new Date(b.created_date));
+
+        setMessages(unique);
+        window.dispatchEvent(new CustomEvent('famly-chat-opened', { detail: { conversationId } }));
+      } catch (error) {
+        console.error("Chat initialization error:", error);
+        toast({ title: "Chat Error", description: "Could not initialize chat", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
+      }
     };
 
-    const handleAiAction = async () => {
-        if (isAiProcessing || !aiAssistant) return;
-        setIsAiProcessing(true);
-        setPendingAction(null);
+    loadChatData();
+  }, [conversationId]);
 
-        try {
-            const conversationHistory = messages.map(msg => {
-                const sender = familyMembers.find(m => m.id === msg.sender_id);
-                return `${sender?.name || 'Unknown'}: ${msg.content}`;
-            }).join('\n');
+  // WebSocket live updates
+  useEffect(() => {
+    if (!conversationId || !currentUserMember) return;
 
-            // SECURITY FIX: Only include members from the current user's family
-            const currentUserFamilyId = currentUserMember?.family_id;
-            const safeFamilyMemberInfo = familyMembers
-                .filter(m => m.family_id === currentUserFamilyId && m.role !== 'ai_assistant')
-                .map(m => ({ id: m.id, name: m.name }));
+    const token = localStorage.getItem("famlyai_token");
+    if (!token) {
+      console.warn("❌ No access token found, not opening WebSocket.");
+      return;
+    }
 
-            const response = await InvokeLLM({
-                prompt: `You are famly.ai, a helpful Dutch family assistant. Analyze the ENTIRE CHAT LOG provided below to provide a summary and create actionable items.
+    const ws = new WebSocket(`ws://localhost:8000/ws?token=${token}`);
 
+    ws.onopen = () => {
+      const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.send("ping");
+      }, 30000);
+      ws.pingInterval = pingInterval;
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        if (!event.data.startsWith("{")) return; // "pong" etc.
+
+        const { type, payload } = JSON.parse(event.data);
+
+        if (type === "chat_cleared" && payload.conversation_id === conversationId) {
+          setMessages([]);
+        }
+
+        if (type === "chat_message_created" && payload.conversation_id === conversationId) {
+          setMessages(prev => {
+            const ids = new Set(prev.map(msg => msg.id));
+            if (ids.has(payload.id)) {
+              console.warn("🟡 Duplicate message blocked from WebSocket:", payload.id);
+              return prev;
+            }
+            const out = [...prev, payload];
+            out.sort((a, b) => new Date(a.created_date) - new Date(b.created_date));
+            return out;
+          });
+        }
+      } catch (err) {
+        console.error("❌ WebSocket parse error:", err);
+      }
+    };
+
+    ws.onerror = (err) => console.error("⚠️ WebSocket error:", err);
+
+    ws.onclose = () => {
+      if (ws.pingInterval) clearInterval(ws.pingInterval);
+    };
+
+    return () => {
+      if (ws.pingInterval) clearInterval(ws.pingInterval);
+      ws.close();
+    };
+  }, [conversationId, currentUserMember]);
+
+  // autoscroll
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isAiProcessing, pendingAction]);
+
+  // mark read
+  useEffect(() => {
+    const markMessagesAsRead = async () => {
+      if (!conversationId || !currentUserMember || messages.length === 0) return;
+      try {
+        await Conversation.markAsRead(conversationId);
+        window.dispatchEvent(new CustomEvent('famly-chat-read', { detail: { conversationId } }));
+      } catch (error) {
+        console.error("Failed to mark messages as read:", error);
+      }
+    };
+    markMessagesAsRead();
+  }, [conversationId, currentUserMember, messages.length]);
+
+  const handleSendMessage = async () => {
+    if (!inputValue.trim()) return;
+    if (isSending || !currentUserMember) {
+      console.warn("Blocked send: isSending or missing user");
+      return;
+    }
+
+    setIsSending(true);
+    const content = inputValue.trim();
+    setInputValue('');
+
+    try {
+      await ChatMessage.create({
+        conversation_id: conversationId,
+        sender_id: currentUserMember.id,
+        content,
+        message_type: 'user_message',
+        read_by: [currentUserMember.id]
+      });
+
+      await Conversation.update(conversationId, {
+        last_message_preview: content,
+        last_message_timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("Error sending message:", error);
+      setInputValue(content); // restore
+      toast({ title: "Send Failed", variant: "destructive" });
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleAiAction = async () => {
+    if (isAiProcessing || !aiAssistant) return;
+    setIsAiProcessing(true);
+    setPendingAction(null);
+
+    try {
+      const conversationHistory = messages.map(msg => {
+        const sender = familyMembers.find(m => m.id === msg.sender_id);
+        return `${sender?.name || 'Unknown'}: ${msg.content}`;
+      }).join('\n');
+
+      const currentUserFamilyId = currentUserMember?.family_id;
+      const safeFamilyMemberInfo = familyMembers
+        .filter(m => m.family_id === currentUserFamilyId && m.role !== 'ai_assistant')
+        .map(m => ({ id: m.id, name: m.name }));
+
+      const response = await InvokeLLM({
+        prompt: `You are famly.ai, a helpful Dutch family assistant.
+
+Analyseer het HELE gesprek en lever:
+- een KORTE Nederlandse samenvatting
+- concrete TAKEN en AFSPRAKEN die nu aangemaakt moeten worden
+- optioneel WISHLIST-items
+
+Regels:
+- Antwoord ALLEEN met JSON (geen markdown of extra tekst).
+- Schrijf alle menselijke velden in het Nederlands (samenvatting, titels, beschrijvingen).
+- Gebruik ALLEEN bestaande family member IDs uit de lijst.
+- Kies bij voorkeur nabije datums/tijden (7–14 dagen) en geen verleden.
+- 24u notatie, ISO zonder tijdzone (YYYY-MM-DDTHH:MM:SS).
+- Als het vaag is: geef kleine, zekere acties. Liever weinig en goed.
+
+Context:
 CHAT LOG:
 ---
 ${conversationHistory}
 ---
 
-You can help with:
-1. Creating TASKS (like "maak een taak om de was te doen")
-2. Scheduling EVENTS (like "plan een afspraak voor morgen")  
-3. Adding items to WISHLISTS (like "voeg dit toe aan mijn verlanglijst")
-
-Based on the chat, identify:
-1. A concise summary of the conversation in Dutch.
-2. Any tasks that need to be created.
-3. Any events that need to be scheduled.
-4. Any items to add to wishlists.
-
-Family Members: ${JSON.stringify(safeFamilyMemberInfo)}
+Family Members (IDs bruikbaar): ${JSON.stringify(safeFamilyMemberInfo, null, 2)}
 Current User ID: ${currentUserMember?.id}
 Family ID: ${currentUserFamilyId}
 
-Respond with a JSON object with the following structure:
+Return exact JSON:
 {
-  "summary": "Een korte samenvatting van het gesprek in het Nederlands.",
+  "summary": "korte NL samenvatting",
   "tasks": [
-    { "title": "string", "description": "string", "assigned_to": ["string: an actual family member ID from the 'Family Members' list"], "family_id": "${currentUserFamilyId}" }
+    {
+      "title": "string (NL, kort)",
+      "description": "string (NL, optioneel)",
+      "assigned_to": ["<family_member_id>", "..."],
+      "family_id": "${currentUserFamilyId}",
+      "due_time": "YYYY-MM-DDTHH:MM:SS (optioneel)"
+    }
   ],
   "events": [
-    { "title": "string", "start_time": "string: YYYY-MM-DDTHH:MM:SS format", "end_time": "string: YYYY-MM-DDTHH:MM:SS format", "family_member_ids": ["string: an actual family member ID from the 'Family Members' list"], "family_id": "${currentUserFamilyId}" }
+    {
+      "title": "string (NL, kort)",
+      "start_time": "YYYY-MM-DDTHH:MM:SS",
+      "end_time": "YYYY-MM-DDTHH:MM:SS",
+      "family_member_ids": ["<family_member_id>", "..."],
+      "family_id": "${currentUserFamilyId}",
+      "location": "string (optioneel)"
+    }
   ],
   "wishlist_items": [
-    { "name": "string", "url": "string: optional URL", "family_member_id": "string: an actual family member ID from the 'Family Members' list" }
-  ]
-}
-
-If no tasks, events, or wishlist items are found, return empty arrays. The summary is mandatory.`,
-                response_json_schema: {
-                    type: "object",
-                    properties: {
-                        summary: { type: "string" },
-                        tasks: { type: "array", items: { type: "object" } },
-                        events: { type: "array", items: { type: "object" } },
-                        wishlist_items: { type: "array", items: { type: "object" } }
-                    },
-                    required: ["summary"]
-                }
-            });
-
-            if (!response.summary) {
-                throw new Error("AI did not provide a summary.");
-            }
-
-            const createdAiMessage = await ChatMessage.create({
-                conversation_id: conversationId,
-                sender_id: aiAssistant.id,
-                content: response.summary,
-                message_type: 'ai_suggestion'
-            });
-
-            if ((response.tasks && response.tasks.length > 0) || 
-                (response.events && response.events.length > 0) ||
-                (response.wishlist_items && response.wishlist_items.length > 0)) {
-                setPendingAction({
-                    tasks: response.tasks || [],
-                    events: response.events || [],
-                    wishlist_items: response.wishlist_items || [],
-                    messageId: createdAiMessage.id
-                });
-            }
-
-        } catch (error) {
-            console.error("AI action error:", error);
-            toast({ title: "AI Error", description: "Could not get suggestions.", variant: "destructive" });
-        } finally {
-            setIsAiProcessing(false);
-        }
-    };
-
-    const handleConfirmActions = async (confirmedTasks, confirmedEvents, confirmedWishlistItems = []) => {
-        try {
-            if (confirmedTasks.length > 0) await Task.bulkCreate(confirmedTasks);
-            if (confirmedEvents.length > 0) await ScheduleEvent.bulkCreate(confirmedEvents);
-            if (confirmedWishlistItems.length > 0) await WishlistItem.bulkCreate(confirmedWishlistItems);
-
-            if (confirmedTasks.length > 0 || confirmedEvents.length > 0 || confirmedWishlistItems.length > 0) {
-                toast({ title: "AI Suggestions Added", description: "Tasks, events, and wishlist items have been added." });
-            }
-        } catch (error) {
-            console.error("Error confirming AI actions:", error);
-            toast({ title: "Error", description: "Could not save all suggestions.", variant: "destructive" });
-        } finally {
-            setPendingAction(null);
-        }
-    };
-
-    const getMember = (memberId) => familyMembers.find(m => m.id === memberId);
-
-    if (isLoading) {
-        return <div className="h-full flex items-center justify-center bg-gray-50"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>;
+    {
+      "name": "string",
+      "url": "string (optioneel)",
+      "family_member_id": "<family_member_id>"
     }
+  ]
+}`,
+        response_json_schema: {
+          type: "object",
+          properties: {
+            summary: { type: "string" },
+            tasks: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                  description: { type: "string" },
+                  assigned_to: { type: "array", items: { type: "string" } },
+                  family_id: { type: "string" },
+                  due_time: { type: "string" }
+                },
+                required: ["title", "assigned_to", "family_id"]
+              }
+            },
+            events: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                  start_time: { type: "string" },
+                  end_time: { type: "string" },
+                  family_member_ids: { type: "array", items: { type: "string" } },
+                  family_id: { type: "string" },
+                  location: { type: "string" }
+                },
+                required: ["title", "start_time", "end_time", "family_member_ids", "family_id"]
+              }
+            },
+            wishlist_items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  url: { type: "string" },
+                  family_member_id: { type: "string" }
+                },
+                required: ["name", "family_member_id"]
+              }
+            }
+          },
+          required: ["summary", "tasks", "events", "wishlist_items"],
+          anyOf: [
+            { properties: { tasks: { minItems: 1 } } },
+            { properties: { events: { minItems: 1 } } },
+            { properties: { wishlist_items: { minItems: 1 } } }
+          ]
+        },
+        strict: true,
+      });
 
+      const data = response?.data || {};
+      const summary = response?.summary ?? data.summary ?? "AI suggesties";
+      const tasks = response?.tasks ?? data.tasks ?? [];
+      const events = response?.events ?? data.events ?? [];
+      const wishlist = response?.wishlist_items ?? data.wishlist_items ?? [];
+
+      const createdAiMessage = await ChatMessage.create({
+        conversation_id: conversationId,
+        sender_id: aiAssistant.id,
+        content: summary,
+        message_type: 'ai_suggestion',
+        read_by: [aiAssistant.id],
+      });
+
+      if ((tasks && tasks.length) || (events && events.length) || (wishlist && wishlist.length)) {
+        setPendingAction({
+          tasks,
+          events,
+          wishlist_items: wishlist,
+          messageId: createdAiMessage.id
+        });
+      } else {
+        toast({ title: "Geen acties", description: "De AI vond geen duidelijke acties op basis van dit gesprek.", duration: 5000 });
+      }
+    } catch (error) {
+      console.error("AI action error:", error);
+      toast({ title: "AI Error", description: "Kon geen suggesties ophalen.", variant: "destructive", duration: 5000 });
+    } finally {
+      setIsAiProcessing(false);
+    }
+  };
+
+  const handleConfirmActions = async (confirmedTasks, confirmedEvents, confirmedWishlistItems = []) => {
+    try {
+      if (confirmedTasks.length > 0) await Task.bulkCreate(confirmedTasks);
+      if (confirmedEvents.length > 0) await ScheduleEvent.bulkCreate(confirmedEvents);
+      if (confirmedWishlistItems.length > 0) await WishlistItem.bulkCreate(confirmedWishlistItems);
+
+      if (confirmedTasks.length > 0 || confirmedEvents.length > 0 || confirmedWishlistItems.length > 0) {
+        toast({ title: "AI Suggestions Added", description: "Taken, events en wishlist items zijn toegevoegd.", duration: 5000 });
+      }
+    } catch (error) {
+      console.error("Error confirming AI actions:", error);
+      toast({ title: "Error", description: "Niet alles kon worden opgeslagen.", variant: "destructive", duration: 5000 });
+    } finally {
+      setPendingAction(null);
+    }
+  };
+
+  const getMember = (memberId) => familyMembers.find(m => m.id === memberId);
+
+  if (isLoading) {
     return (
-        <div className="h-full flex flex-col bg-gray-50 relative">
-            <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ scrollBehavior: 'smooth' }}>
-                <AnimatePresence>
-                    {messages.map((msg) => {
-                        const sender = getMember(msg.sender_id);
-                        const isCurrentUser = sender?.id === currentUserMember?.id;
-                        const isAI = sender?.role === 'ai_assistant';
-                        const isAiIntroduction = msg.message_type === 'ai_introduction';
-                        
-                        if (isAiIntroduction) {
-                            return (
-                                <motion.div key={msg.id} layout initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex justify-center my-6">
-                                    <div className="bg-gradient-to-r from-green-100 to-emerald-100 border-2 border-green-300 rounded-xl px-6 py-4 max-w-md text-center shadow-lg">
-                                        <div className="flex items-center justify-center gap-2 mb-2">
-                                            <Bot className="w-5 h-5 text-green-600" />
-                                            <span className="font-semibold text-green-800">AI Assistent</span>
-                                        </div>
-                                        <p className="text-sm text-green-700">{msg.content}</p>
-                                        <p className="text-xs text-green-600 mt-2">{new Date(msg.created_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                                    </div>
-                                </motion.div>
-                            );
-                        }
-                        
-                        return (
-                            <motion.div key={msg.id} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-                                <div className={`flex items-end gap-3 ${isCurrentUser ? 'justify-end' : ''}`}>
-                                    {!isCurrentUser && sender && (
-                                        <div 
-                                            className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold text-xs shrink-0 ${isAI ? 'bg-gradient-to-r from-green-500 to-emerald-500' : ''}`}
-                                            style={{backgroundColor: isAI ? undefined : (sender.color || '#6b7280')}}
-                                        >
-                                            {isAI ? <Bot className="w-4 h-4" /> : sender.name.charAt(0)}
-                                        </div>
-                                    )}
-                                    <div
-                                        className={`max-w-[80%] px-4 py-2 rounded-2xl ${
-                                            isCurrentUser 
-                                                ? 'bg-blue-500 text-white rounded-br-md' 
-                                                : isAI 
-                                                    ? 'bg-gradient-to-r from-green-50 to-emerald-50 text-gray-800 rounded-bl-md shadow-sm border border-green-200'
-                                                    : 'bg-white text-gray-800 rounded-bl-md shadow-sm border'
-                                        }`}
-                                    >
-                                        {!isCurrentUser && sender && (
-                                            <p className={`font-semibold text-xs mb-1 ${isAI ? 'text-green-600' : ''}`} style={{color: isAI ? undefined : (sender.color || '#6b7280')}}>
-                                                {sender.name}
-                                            </p>
-                                        )}
-                                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                                        <p className={`text-xs mt-1 ${isCurrentUser ? 'text-blue-100' : 'text-gray-500'}`}>{new Date(msg.created_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                                    </div>
-                                </div>
-                                
-                                {pendingAction && msg.id === pendingAction.messageId && (
-                                    <div className={`mt-2 ${isCurrentUser ? 'ml-auto' : 'ml-11'}`}>
-                                        {pendingAction.tasks.length > 0 && (
-                                            <TasksReviewer 
-                                                tasks={pendingAction.tasks} 
-                                                familyMembers={familyMembers} 
-                                                onConfirm={(confirmed) => handleConfirmActions(confirmed, [], [])}
-                                                onCancel={() => setPendingAction(null)}
-                                            />
-                                        )}
-                                        {pendingAction.events.length > 0 && (
-                                            <VacationEventsReview 
-                                                events={pendingAction.events} 
-                                                onConfirm={(confirmed) => handleConfirmActions([], confirmed, [])} 
-                                            />
-                                        )}
-                                        {pendingAction.wishlist_items && pendingAction.wishlist_items.length > 0 && (
-                                            <div className="p-3 bg-purple-50/50 border border-purple-200 rounded-lg shadow-sm space-y-2">
-                                                <h4 className="font-semibold text-sm text-purple-800">Wishlist Items:</h4>
-                                                {pendingAction.wishlist_items.map((item, i) => {
-                                                    const member = familyMembers.find(m => m.id === item.family_member_id);
-                                                    return (
-                                                        <div key={i} className="text-sm bg-white p-2 rounded border">
-                                                            <strong>{item.name}</strong> voor {member?.name}
-                                                        </div>
-                                                    );
-                                                })}
-                                                <div className="flex justify-end gap-2 pt-2">
-                                                    <Button variant="ghost" size="sm" onClick={() => setPendingAction(null)}>Cancel</Button>
-                                                    <Button size="sm" onClick={() => handleConfirmActions([], [], pendingAction.wishlist_items)} className="bg-purple-600 hover:bg-purple-700">Add to Wishlist</Button>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </motion.div>
-                        );
-                    })}
-                </AnimatePresence>
-                
-                {isAiProcessing && (
-                    <motion.div
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="flex items-end gap-3"
-                    >
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center shrink-0">
-                            <Bot className="w-4 h-4 text-white" />
-                        </div>
-                        <div className="bg-gradient-to-r from-green-50 to-emerald-50 text-gray-800 rounded-2xl rounded-bl-md shadow-sm border border-green-200 px-4 py-2">
-                            <div className="flex items-center gap-2">
-                                <Loader2 className="w-4 h-4 animate-spin text-green-600" />
-                                <span className="text-sm text-green-600">AI analyseert het gesprek...</span>
-                            </div>
-                        </div>
-                    </motion.div>
-                )}
-                
-                <div ref={messagesEndRef} />
-            </div>
-
-            {aiAssistant && (
-                <div className="absolute bottom-24 right-6 z-10">
-                    <Button
-                        onClick={handleAiAction}
-                        disabled={isAiProcessing || isSending}
-                        className="rounded-full h-14 w-14 p-0 bg-gradient-to-br from-purple-500 to-indigo-600 text-white shadow-lg hover:opacity-90 transition-all duration-300 transform hover:scale-110"
-                        aria-label="AI Action"
-                    >
-                        {isAiProcessing ? <Loader2 className="h-6 w-6 animate-spin" /> : <Sparkles className="h-6 w-6" />}
-                    </Button>
-                </div>
-            )}
-
-            <div className="flex-shrink-0 p-4 bg-white border-t border-gray-200">
-                <div className="flex items-center gap-3">
-                    <Textarea 
-                        value={inputValue} 
-                        onChange={(e) => setInputValue(e.target.value)} 
-                        placeholder="Typ een bericht..." 
-                        className="flex-1 resize-none min-h-[40px] max-h-[100px]" 
-                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); }}} 
-                        disabled={isSending || isAiProcessing} 
-                    />
-                    <Button onClick={handleSendMessage} disabled={!inputValue.trim() || isSending || isAiProcessing} className="bg-blue-500 hover:bg-blue-600">
-                        {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    </Button>
-                </div>
-            </div>
-        </div>
+      <div className="h-full flex items-center justify-center bg-gray-50">
+        <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+      </div>
     );
+  }
+
+  return (
+    <div className="h-full flex flex-col bg-gray-50 relative">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{ scrollBehavior: 'smooth' }}>
+        <AnimatePresence>
+          {messages.map((msg, index) => {
+            const sender = getMember(msg.sender_id);
+
+            // 🔁 SLIPPED-IN: robust "is this my message?"
+            const isCurrentUser =
+              (currentUserMember?.id && msg.sender_id === currentUserMember.id) ||
+              (sender?.id && currentUserMember?.id && sender.id === currentUserMember.id);
+
+            const isAI = sender?.role === 'ai_assistant';
+            const isAiIntroduction = msg.message_type === 'ai_introduction';
+
+            if (isAiIntroduction) {
+              return (
+                <motion.div key={msg.id || index} layout initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex justify-center my-6">
+                  <div className="bg-gradient-to-r from-green-100 to-emerald-100 border-2 border-green-300 rounded-xl px-6 py-4 max-w-md text-center shadow-lg">
+                    <div className="flex items-center justify-center gap-2 mb-2">
+                      <Bot className="w-5 h-5 text-green-600" />
+                      <span className="font-semibold text-green-800">AI Assistent</span>
+                    </div>
+                    <p className="text-sm text-green-700">{msg.content}</p>
+                    <p className="text-xs text-green-600 mt-2">{new Date(msg.created_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                  </div>
+                </motion.div>
+              );
+            }
+
+            return (
+              <motion.div key={msg.id || index} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+                <div className={`flex items-end gap-3 ${isCurrentUser ? 'justify-end' : ''}`}>
+                  {!isCurrentUser && sender && (
+                    <div
+                      className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold text-xs shrink-0 ${isAI ? 'bg-gradient-to-r from-green-500 to-emerald-500' : ''}`}
+                      style={{ backgroundColor: isAI ? undefined : (sender.color || '#6b7280') }}
+                    >
+                      {isAI ? <Bot className="w-4 h-4" /> : sender.name.charAt(0)}
+                    </div>
+                  )}
+                  <div
+                    className={`max-w-[80%] px-4 py-2 rounded-2xl ${
+                      isCurrentUser
+                        ? 'bg-blue-500 text-white rounded-br-md'
+                        : isAI
+                          ? 'bg-gradient-to-r from-green-50 to-emerald-50 text-gray-800 rounded-bl-md shadow-sm border border-green-200'
+                          : 'bg-white text-gray-800 rounded-bl-md shadow-sm border'
+                    }`}
+                  >
+                    {!isCurrentUser && sender && (
+                      <p className={`font-semibold text-xs mb-1 ${isAI ? 'text-green-600' : ''}`} style={{ color: isAI ? undefined : (sender.color || '#6b7280') }}>
+                        {sender.name}
+                      </p>
+                    )}
+                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+
+                    {(() => {
+                      const timestamp = new Date(msg.created_date);
+                      const timeString = isNaN(timestamp.getTime())
+                        ? null
+                        : timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                      const seenBy = familyMembers.filter(
+                        (m) =>
+                          m.id !== msg.sender_id &&
+                          (participants || []).includes(m.id) &&
+                          (msg.read_by || []).includes(m.id)
+                      );
+
+                      const notSeenBy = familyMembers.filter(
+                        (m) =>
+                          m.id !== msg.sender_id &&
+                          (participants || []).includes(m.id) &&
+                          !(msg.read_by || []).includes(m.id)
+                      );
+
+                      return (
+                        <div className="flex justify-end gap-1 mt-1 items-end">
+                          {timeString && (
+                            <p className={`text-xs ${isCurrentUser ? 'text-blue-100' : 'text-gray-500'}`}>
+                              {timeString}
+                            </p>
+                          )}
+
+                          {seenBy.length > 0 && (
+                            <div className="flex -space-x-1 ml-2">
+                              {seenBy.map((member) => (
+                                <span key={member.id} title={`Seen by ${member.name}`} className="relative z-10">
+                                  <svg className="w-3.5 h-3.5 -ml-1.5" viewBox="0 0 24 24" fill={member.color || '#6b7280'}>
+                                    <path d="M1 12l5 5L20 4" stroke="currentColor" strokeWidth="2" fill="none" />
+                                  </svg>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {notSeenBy.length > 0 && (
+                            <div className="flex -space-x-1 ml-1 opacity-50">
+                              {notSeenBy.map((member) => (
+                                <span key={member.id} title={`Not yet seen by ${member.name}`} className="relative z-0">
+                                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="#d1d5db">
+                                    <path d="M1 12l5 5L20 4" stroke="currentColor" strokeWidth="2" fill="none" />
+                                  </svg>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {pendingAction && msg.id === pendingAction.messageId && (
+                  <div className={`mt-2 ${isCurrentUser ? 'ml-auto' : 'ml-11'}`}>
+                    {pendingAction.tasks && pendingAction.tasks.length > 0 && (
+                      <TasksReviewer
+                        tasks={pendingAction.tasks}
+                        familyMembers={familyMembers}
+                        onConfirm={(confirmed) => handleConfirmActions(confirmed, [], [])}
+                        onCancel={() => setPendingAction(null)}
+                      />
+                    )}
+                    {pendingAction.events && pendingAction.events.length > 0 && (
+                      <VacationEventsReview
+                        events={pendingAction.events}
+                        onConfirm={(confirmed) => handleConfirmActions([], confirmed, [])}
+                      />
+                    )}
+                    {pendingAction.wishlist_items && pendingAction.wishlist_items.length > 0 && (
+                      <div className="p-3 bg-purple-50/50 border border-purple-200 rounded-lg shadow-sm space-y-2">
+                        <h4 className="font-semibold text-sm text-purple-800">Wishlist Items:</h4>
+                        {pendingAction.wishlist_items.map((item, i) => {
+                          const member = familyMembers.find(m => m.id === item.family_member_id);
+                          return (
+                            <div key={i} className="text-sm bg-white p-2 rounded border">
+                              <strong>{item.name}</strong> voor {member?.name}
+                            </div>
+                          );
+                        })}
+                        <div className="flex justify-end gap-2 pt-2">
+                          <Button variant="ghost" size="sm" onClick={() => setPendingAction(null)}>Cancel</Button>
+                          <Button size="sm" onClick={() => handleConfirmActions([], [], pendingAction.wishlist_items)} className="bg-purple-600 hover:bg-purple-700">Add to Wishlist</Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
+
+        {isAiProcessing && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex items-end gap-3">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center shrink-0">
+              <Bot className="w-4 h-4 text-white" />
+            </div>
+            <div className="bg-gradient-to-r from-green-50 to-emerald-50 text-gray-800 rounded-2xl rounded-bl-md shadow-sm border border-green-200 px-4 py-2">
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-green-600" />
+                <span className="text-sm text-green-600">AI analyseert het gesprek...</span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      {aiAssistant && (
+        <div className="absolute bottom-24 right-6 z-10">
+          <Button
+            onClick={handleAiAction}
+            disabled={isAiProcessing || isSending}
+            className="rounded-full h-14 w-14 p-0 bg-gradient-to-br from-purple-500 to-indigo-600 text-white shadow-lg hover:opacity-90 transition-all duration-300 transform hover:scale-110"
+            aria-label="AI Action"
+          >
+            {isAiProcessing ? <Loader2 className="h-6 w-6 animate-spin" /> : <Sparkles className="h-6 w-6" />}
+          </Button>
+        </div>
+      )}
+
+      <div className="flex-shrink-0 p-4 bg-white border-t border-gray-200">
+        <div className="flex items-center gap-3">
+          <Textarea
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            placeholder="Typ een bericht..."
+            className="flex-1 resize-none min-h-[40px] max-h-[100px]"
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
+            disabled={isSending || isAiProcessing}
+          />
+          <Button onClick={handleSendMessage} disabled={!inputValue.trim() || isSending || isAiProcessing} className="bg-blue-500 hover:bg-blue-600">
+            {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
 }

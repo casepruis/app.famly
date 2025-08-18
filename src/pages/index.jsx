@@ -74,7 +74,7 @@ export default function Index() {
       return;
     }
 
-    setUserEmail(user.email); // Store original email for display
+    setUserEmail(user.user_id); // Store original email for display
     setAuthStatus('authenticated');
 
     if (user && user.family_id) {
@@ -84,7 +84,7 @@ export default function Index() {
     }
 
     // Apply robust normalization to both platform admin and user emails
-    const normalizedUserEmail = normalizeGoogleEmail(user.email);
+    const normalizedUserEmail = normalizeGoogleEmail(user.user_id);
     const normalizedPlatformAdmins = PLATFORM_ADMINS.map(normalizeGoogleEmail);
 
     if (!normalizedPlatformAdmins.includes(normalizedUserEmail)) {
@@ -140,7 +140,7 @@ export default function Index() {
       const user = await User.login("test@example.com", "test123");
       console.log("Logged in as:", user);
       setAuthStatus("authenticated");
-      setUserEmail(user.email);
+      setUserEmail(user.user_id);
       setStatus("Welcome! Redirecting...");
       setTimeout(() => navigate(createPageUrl("Dashboard")), 1000);
     } catch (error) {

@@ -26,8 +26,8 @@ export default function Debug() {
         allFamilies,
         allInvitations,
         allMembers,
-        userInvitations: allInvitations.filter(inv => inv.email === user.email),
-        userPendingInvitations: allInvitations.filter(inv => inv.email === user.email && inv.status === 'pending')
+        userInvitations: allInvitations.filter(inv => inv.email === user.user_id),
+        userPendingInvitations: allInvitations.filter(inv => inv.email === user.user_id && inv.status === 'pending')
       });
     } catch (error) {
       console.error('Debug load error:', error);

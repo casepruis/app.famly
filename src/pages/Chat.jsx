@@ -78,17 +78,18 @@ export default function ChatPage() {
 
         if (isConfirmed) {
             try {
-                const messagesToDelete = await ChatMessage.filter({ conversation_id: activeConversationId });
-                // Filter only messages from the current user (security/privacy consideration, adjust if needed)
-                // For a full chat clear, simply delete all messages associated with the conversation_id
+                await ChatMessage.delete(activeConversationId);
+                // const messagesToDelete = await ChatMessage.filter({ conversation_id: activeConversationId });
+                // // Filter only messages from the current user (security/privacy consideration, adjust if needed)
+                // // For a full chat clear, simply delete all messages associated with the conversation_id
                 
-                // Fetch all messages for the active conversation
-                const allConversationMessages = await ChatMessage.filter({ conversation_id: activeConversationId });
+                // // Fetch all messages for the active conversation
+                // const allConversationMessages = await ChatMessage.filter({ conversation_id: activeConversationId });
 
-                // Delete each message
-                for (const message of allConversationMessages) {
-                    await ChatMessage.delete(message.id);
-                }
+                // // Delete each message
+                // for (const message of allConversationMessages) {
+                //     await ChatMessage.delete(message.id);
+                // }
                 toast({ title: t('chatCleared') || 'Chat Cleared', description: t('allMessagesDeleted') || 'All messages have been deleted.' });
                 setChatVersion(v => v + 1); // Force re-render of ChatWindow
             } catch (error) {
@@ -175,7 +176,11 @@ export default function ChatPage() {
 
                 {/* Chat Messages */}
                 <div className="flex-1 min-h-0">
-                    <ChatWindow key={chatVersion} conversationId={activeConversationId} />
+                    <ChatWindow
+                        key={chatVersion}
+                        conversationId={activeConversationId}
+                        participants={activeConversation?.participants || []}
+                        />
                 </div>
             </div>
         </div>

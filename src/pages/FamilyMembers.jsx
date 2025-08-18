@@ -66,10 +66,17 @@ export default function FamilyMembers() {
       }
       
       const [membersData, invitationsData, familyData] = await Promise.all([
-        FamilyMember.filter({ family_id: user.family_id }, 'created_date'),
+        FamilyMember.filter(),//{ family_id: user.family_id }, 'created_date'),
         FamilyInvitation.filter({ family_id: user.family_id, status: 'pending' }).catch(() => []),
         Family.get(user.family_id).catch(() => null)
       ]);
+
+      // ⛔ Check for missing IDs
+      membersData.forEach((m, i) => {
+        if (!m.id) {
+          console.warn(`⚠️ Member ${i} missing ID:`, m);
+        }
+      });
       
       // Ensure membersData is an array
       const safeMembers = Array.isArray(membersData) ? membersData : [];
@@ -77,6 +84,19 @@ export default function FamilyMembers() {
       
       const loggedInMember = safeMembers.find(m => m.user_id === user.id);
       setCurrentUserMember(loggedInMember);
+
+      const hasAIAssistant = safeMembers.some(m => m.role === 'ai_assistant');
+
+      if (!hasAIAssistant && user.family_id) {
+        const aiMember = await FamilyMember.create({
+          name: 'Famly AI',
+          role: 'ai_assistant',
+          family_id: user.family_id,
+          color: '#8D33FF'  // Pick a consistent purple AI color
+        });
+
+        safeMembers.push(aiMember); // Push it to your array so it renders immediately
+      }
       
       setMembers(safeMembers);
       setInvitations(safeInvitations);
@@ -138,26 +158,43 @@ export default function FamilyMembers() {
     }
   };
 
-  const handleSave = async (memberData) => {
-    try {
-      const user = await User.me();
-      if (editingMember && editingMember.id) {
-        await FamilyMember.update(editingMember.id, memberData);
-        toast({ title: t('memberUpdated') || 'Member updated' });
-      } else {
-        await FamilyMember.create({ ...memberData, family_id: user.family_id });
-        toast({ title: t('memberAdded') || 'Member added' });
-      }
-      loadMembers();
-      setIsDialogOpen(false);
-    } catch (error) {
-      toast({ 
-        title: t('error') || 'Error', 
-        description: t('couldNotSaveMember') || 'Could not save member', 
-        variant: "destructive" 
+const handleSave = async (memberData) => {
+  try {
+    const user = await User.me();
+
+    // 🧼 Clean payload
+  const cleaned = Object.fromEntries(
+    Object.entries({
+      ...memberData,
+      dob: memberData.dob ? new Date(memberData.dob).toISOString().split("T")[0] : null,
+    }).filter(([_, v]) => v !== undefined)
+  );
+    console.log("Saving:", editingMember);
+    if (editingMember && editingMember.id) {
+      console.log("Saving:", editingMember);
+      await FamilyMember.update(editingMember.id, cleaned);
+      toast({ title: t('memberUpdated') || 'Member updated' });
+    } else {
+      await FamilyMember.create({
+        ...cleaned,
+        family_id: user.family_id,
       });
+      toast({ title: t('memberAdded') || 'Member added' });
     }
-  };
+
+    loadMembers();
+    setIsDialogOpen(false);
+  } catch (error) {
+    console.error("❌ Save error:", error);
+    toast({
+      title: t('error') || 'Error',
+      description: t('couldNotSaveMember') || 'Could not save member',
+      variant: "destructive"
+    });
+  }
+};
+
+
 
   const handleInvite = async (inviteData) => {
     try {
@@ -166,7 +203,7 @@ export default function FamilyMembers() {
       // First add to whitelist
       await UserWhitelist.create({
         email: inviteData.email.toLowerCase(), // Normalize email
-        added_by: user.email,
+        added_by: user.user_id,
         status: 'active',
         notes: `Invited as ${inviteData.role} for ${inviteData.name}`
       });
@@ -175,7 +212,7 @@ export default function FamilyMembers() {
       await FamilyInvitation.create({
         email: inviteData.email,
         family_id: user.family_id,
-        invited_by: user.email,
+        invited_by: user.user_id,
         status: 'pending'
       });
 
@@ -246,7 +283,7 @@ export default function FamilyMembers() {
       // Add new email to whitelist
       await UserWhitelist.create({
         email: email.toLowerCase(), // Normalize email
-        added_by: user.email,
+        added_by: user.user_id,
         status: 'active',
         notes: `Connected to existing member ${member.name}`
       });
@@ -255,7 +292,7 @@ export default function FamilyMembers() {
       await FamilyInvitation.create({
         email: email,
         family_id: user.family_id,
-        invited_by: user.email,
+        invited_by: user.user_id,
         status: 'pending'
       });
 
@@ -290,7 +327,7 @@ export default function FamilyMembers() {
         return;
     }
     
-    if (oldConnectedUser && oldConnectedUser.email === newEmail) {
+    if (oldConnectedUser && oldConnecteduser.user_id === newEmail) {
         toast({ title: t('noChangeNeeded'), description: t('emailAlreadyConnected'), variant: 'default' });
         return;
     }
@@ -304,7 +341,7 @@ export default function FamilyMembers() {
       await User.update(member.user_id, { family_id: null });
 
       // 2. Find and properly update whitelist entry for the old user's email
-      const oldWhitelistEntries = await UserWhitelist.filter({ email: oldConnectedUser.email });
+      const oldWhitelistEntries = await UserWhitelist.filter({ email: oldConnecteduser.user_id });
       if (oldWhitelistEntries.length > 0) {
         for (const entry of oldWhitelistEntries) {
           await UserWhitelist.update(entry.id, { 
@@ -323,11 +360,11 @@ export default function FamilyMembers() {
       // 4. Whitelist and invite the new email
       await UserWhitelist.create({ 
         email: newEmail.toLowerCase(), // Normalize email
-        added_by: user.email, 
+        added_by: user.user_id, 
         status: 'active', 
         notes: `Invitation for ${member.name}` 
       });
-      await FamilyInvitation.create({ email: newEmail, family_id: user.family_id, invited_by: user.email, status: 'pending' });
+      await FamilyInvitation.create({ email: newEmail, family_id: user.family_id, invited_by: user.user_id, status: 'pending' });
       
       toast({
         title: t('invitationSent'),
@@ -498,7 +535,7 @@ export default function FamilyMembers() {
               <AnimatePresence>
                 {regularMembers.map((member, index) => (
                     <motion.div
-                      key={member.id}
+                      key={member.id || member.email || member.name || Math.random()}
                       layout
                       initial={{ opacity: 0, scale: 0.9 }}
                       animate={{ opacity: 1, scale: 1 }}
@@ -583,7 +620,7 @@ export default function FamilyMembers() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {aiMembers.map((member) => (
                 <motion.div
-                  key={member.id}
+                  key={member.id || member.email || member.name || Math.random()}
                   layout
                   className="ai-assistant-card relative bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl shadow-sm border border-indigo-200 p-6 text-center hover:shadow-md transition-all flex flex-col"
                 >

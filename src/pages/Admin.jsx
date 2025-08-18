@@ -89,7 +89,7 @@ export default function Admin() {
       await FamilyInvitation.create({
         email: inviteEmail,
         family_id: family.id,
-        invited_by: user.email,
+        invited_by: user.user_id,
         status: 'pending'
       });
 
