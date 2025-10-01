@@ -1,10 +1,10 @@
 import './App.css';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from '@/components/ui/toaster';
 import { LanguageProvider } from '@/components/common/LanguageProvider';
 import PageWithLayout from '@/pages/PageWithLayout'; // new helper component
 
-import Index from '@/pages/Index';
+import Index from '@/pages/index';
 import Dashboard from '@/pages/Dashboard';
 import FamilySetup from '@/pages/FamilySetup';
 import Schedule from '@/pages/Schedule';
@@ -26,6 +26,7 @@ function App() {
     <LanguageProvider>
       <Routes>
         <Route path="/" element={<PageWithLayout><Index /></PageWithLayout>} />
+        <Route path="/index" element={<Navigate to="/" replace />} />
         <Route path="/dashboard" element={<PageWithLayout><Dashboard /></PageWithLayout>} />
         <Route path="/familysetup" element={<PageWithLayout><FamilySetup /></PageWithLayout>} />
         <Route path="/schedule" element={<PageWithLayout><Schedule /></PageWithLayout>} />

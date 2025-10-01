@@ -111,7 +111,8 @@ export default function Dashboard() {
           toast({ 
             title: 'Rate Limit Exceeded', 
             description: 'Too many requests. Please wait a moment and refresh.', 
-            variant: "destructive" 
+            variant: "destructive" , 
+            duration: 5000 
           });
           return;
         }
@@ -147,11 +148,12 @@ export default function Dashboard() {
         toast({ 
           title: 'Rate Limit Exceeded', 
           description: 'Too many requests. Please wait a moment and refresh.', 
-          variant: "destructive" 
+          variant: "destructive" , 
+          duration: 5000 
         });
       } else {
         setHasError(true);
-        toast({ title: t('errorLoadingData'), description: t('couldNotLoadDashboard'), variant: "destructive" });
+        toast({ title: t('errorLoadingData'), description: t('couldNotLoadDashboard'), variant: "destructive", duration: 5000  });
       }
     }
     setIsLoading(false);

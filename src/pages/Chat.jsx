@@ -44,13 +44,13 @@ export default function ChatPage() {
                     if (convo && convo.family_id === currentUser.family_id) {
                         setActiveConversation(convo);
                     } else {
-                        toast({ title: "Error", description: "You do not have access to this conversation.", variant: "destructive" });
+                        toast({ title: "Error", description: "You do not have access to this conversation.", variant: "destructive", duration: 5000  });
                         navigate(createPageUrl('Dashboard'));
                     }
                 }
             } catch (error) {
                 console.error("Failed to load chat data", error);
-                toast({ title: "Chat not found", description: "This conversation may have been deleted.", variant: "destructive" });
+                toast({ title: "Chat not found", description: "This conversation may have been deleted.", variant: "destructive", duration: 5000  });
                 navigate(createPageUrl('Dashboard'));
             } finally {
                 setIsLoading(false);
@@ -66,6 +66,7 @@ export default function ChatPage() {
         toast({
             title: `${feature} ${t('comingSoon') || 'Coming Soon'}`,
             description: t('featureInDevelopment') || 'This feature is currently in development.',
+            duration: 5000 
         });
     };
     
@@ -94,7 +95,7 @@ export default function ChatPage() {
                 setChatVersion(v => v + 1); // Force re-render of ChatWindow
             } catch (error) {
                 console.error("Failed to clear chat:", error);
-                toast({ title: t('error') || 'Error', description: t('couldNotClearChat') || 'Could not clear chat messages.', variant: "destructive" });
+                toast({ title: t('error') || 'Error', description: t('couldNotClearChat') || 'Could not clear chat messages.', variant: "destructive", duration: 5000  });
             }
         }
     };

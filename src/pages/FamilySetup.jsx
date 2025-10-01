@@ -84,7 +84,7 @@ export default function FamilySetup() {
               pending_user_email: null
             });
             
-            toast({ title: "Connection Successful!", description: `Welcome, ${memberProfile.name}! Redirecting...` });
+            toast({ title: "Connection Successful!", description: `Welcome, ${memberProfile.name}! Redirecting...` , duration: 5000 });
             navigate(createPageUrl("Dashboard"));
             return;
           }
@@ -119,7 +119,7 @@ export default function FamilySetup() {
   const handleCreateFamily = async (e) => {
     e.preventDefault();
     if (!user) {
-        toast({ title: "Error", description: "User session not found. Please log in again.", variant: "destructive" });
+        toast({ title: "Error", description: "User session not found. Please log in again.", variant: "destructive", duration: 5000  });
         return;
     }
 
@@ -134,7 +134,7 @@ export default function FamilySetup() {
         const currentUser = await User.me();
         if (currentUser.family_id) {
             console.log("User already has family_id:", currentUser.family_id);
-            toast({ title: "Error", description: "You already belong to a family. Redirecting...", variant: "destructive" });
+            toast({ title: "Error", description: "You already belong to a family. Redirecting...", variant: "destructive", duration: 5000  });
             navigate(createPageUrl("Dashboard"));
             return;
         }
@@ -193,6 +193,7 @@ export default function FamilySetup() {
         toast({
             title: "Family Hub Created!",
             description: "Redirecting you to your new dashboard...",
+            duration: 5000 
         });
 
         // Small delay to ensure all database operations are complete
@@ -209,13 +210,15 @@ export default function FamilySetup() {
             toast({ 
                 title: "Duplicate Family", 
                 description: "A family with this name already exists. Please choose a different name.", 
-                variant: "destructive" 
+                variant: "destructive" ,
+                duration: 5000 
             });
         } else {
             toast({ 
                 title: "Error", 
                 description: `Could not create family: ${err.message || 'Unknown error'}. Please try again.`, 
-                variant: "destructive" 
+                variant: "destructive" ,
+                duration: 5000 
             });
         }
     } finally {

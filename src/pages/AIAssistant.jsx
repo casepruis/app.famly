@@ -77,7 +77,7 @@ export default function AIAssistant() {
     <div className="h-[calc(100vh-var(--header-height,65px))] flex bg-white">
       <Joyride steps={assistantTourSteps} run={runTour} onComplete={handleTourComplete} />
 
-      {/* Back Button */}
+      {/* Back Button
       <div className="absolute top-4 left-4 z-10">
         <Link to={createPageUrl('Dashboard')}>
           <Button variant="ghost" size="sm" className="text-gray-500 hover:text-gray-700">
@@ -85,7 +85,7 @@ export default function AIAssistant() {
             {t('backToDashboard') || 'Back'}
           </Button>
         </Link>
-      </div>
+      </div> */}
 
       <div id="ai-chat-interface" className="flex-1 flex flex-col">
         <UnifiedAIAssistant

@@ -158,7 +158,7 @@ export default function Tasks() {
       setFamilyMembers(membersData);
     } catch (error) {
       console.error("Error loading tasks data:", error);
-      toast({ title: "Error", description: "Failed to load tasks", variant: "destructive" });
+      toast({ title: "Error", description: "Failed to load tasks", variant: "destructive" , duration: 5000 });
     } finally {
         setIsLoading(false);
     }
@@ -209,6 +209,7 @@ export default function Tasks() {
           toast({
             title: t("task.dueDateNeededTitle") || "Due date needed",
             description: t("task.dueDateNeededDescription") || "Please pick a due date before saving.",
+            duration: 5000 
           });
           setIsFormOpen(true);
           setEditingTask(taskData);
@@ -218,6 +219,7 @@ export default function Tasks() {
         toast({
           title: t("task.noDateDetectedTitle") || "No clear date detected",
           description: t("task.noDateDetectedDescription") || "Please set a due date so we can schedule this properly.",
+          duration: 5000 
         });
         setIsFormOpen(true);
         setEditingTask(taskData);
@@ -228,10 +230,10 @@ export default function Tasks() {
     setIsSaving(true);
     if (editingTask) {
       await Task.update(editingTask.id, taskToSave);
-      toast({ title: t("task.updatedTitle") });
+      toast({ title: t("task.updatedTitle"), description: "Task updated", duration: 5000 });
     } else {
       await Task.create(taskToSave);  // backend now generates id
-      toast({ title: t("task.createdTitle") });
+      toast({ title: t("task.createdTitle"), description: "Task created", duration: 5000  });
     }
     setIsSaving(false);
 
@@ -248,6 +250,7 @@ export default function Tasks() {
         (error && error.detail && (error.detail.detail || error.detail)) ||
         t("task.saveError"),
       variant: "destructive",
+      duration: 5000 
     });
   }
 };
@@ -257,9 +260,9 @@ export default function Tasks() {
     try {
         await Task.delete(taskId);
         loadData();
-        toast({ title: t("task.deletedTitle") });
+        toast({ title: t("task.deletedTitle") , duration: 5000 });
     } catch (error) {
-        toast({ title: t("error"), description: t("task.deleteError"), variant: "destructive" });
+        toast({ title: t("error"), description: t("task.deleteError"), variant: "destructive" , duration: 5000 });
     }
   };
 
@@ -268,9 +271,9 @@ export default function Tasks() {
       const taskToUpdate = tasks.find(task => task.id === taskId);
       await Task.update(taskId, { ...taskToUpdate, status: newStatus });
       loadData();
-      toast({ title: t("task.statusUpdatedTitle") });
+      toast({ title: t("task.statusUpdatedTitle"), description: "Task updated", duration: 5000  });
     } catch (error) {
-      toast({ title: t("error"), description: t("task.statusUpdateError"), variant: "destructive" });
+      toast({ title: t("error"), description: t("task.statusUpdateError"), variant: "destructive", duration: 5000  });
     }
   };
 

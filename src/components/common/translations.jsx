@@ -120,6 +120,7 @@ const translations = {
     selectOption: 'Select option',
     processingFailed: 'Processing failed',
     unexpectedErrorOccurred: 'An unexpected error occurred. Please try again.',
+    noEventsToday: 'No events today',
     
     // Tasks Page
     createNewTask: 'Create new task',
@@ -283,6 +284,7 @@ const translations = {
     aiName: 'AI Name',
     aiNamePlaceholder: 'e.g., Alex, Jamie, Assistant',
     editName: 'Edit Name',
+    
   },
   nl: {
     // General
@@ -405,6 +407,7 @@ const translations = {
     selectOption: 'Selecteer een optie',
     processingFailed: 'Verwerking mislukt',
     unexpectedErrorOccurred: 'Er is een onverwachte fout opgetreden. Probeer het opnieuw.',
+    noEventsToday: 'Vandaag geen evenementen',
 
     // Tasks Page
     createNewTask: 'Nieuwe taak aanmaken',
@@ -568,6 +571,7 @@ const translations = {
     aiName: 'AI-naam',
     aiNamePlaceholder: 'bijv. Alex, Jamie, Assistent',
     editName: 'Naam bewerken',
+    
   },
   es: {
     // Admin page translations

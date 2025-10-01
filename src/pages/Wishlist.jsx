@@ -91,10 +91,10 @@ export default function Wishlist() {
     if (name) {
       try {
         await WishlistItem.update(item.id, { status: 'claimed', claimed_by_name: name });
-        toast({ title: "Item geclaimd!", description: `Je hebt ${item.name} succesvol geclaimd.` });
+        toast({ title: "Item geclaimd!", description: `Je hebt ${item.name} succesvol geclaimd.` , duration: 5000 });
         loadItems();
       } catch (e) {
-        toast({ title: "Fout", description: "Kon item niet claimen.", variant: "destructive" });
+        toast({ title: "Fout", description: "Kon item niet claimen.", variant: "destructive" , duration: 5000 });
       }
     }
   };
@@ -103,10 +103,10 @@ export default function Wishlist() {
     if (window.confirm("Weet je zeker dat je dit item wilt vrijgeven zodat het weer beschikbaar is?")) {
       try {
         await WishlistItem.update(item.id, { status: 'available', claimed_by_name: null });
-        toast({ title: "Item vrijgegeven", description: `${item.name} is weer beschikbaar.` });
+        toast({ title: "Item vrijgegeven", description: `${item.name} is weer beschikbaar.` , duration: 5000 });
         loadItems();
       } catch (e) {
-        toast({ title: "Fout", description: "Kon item niet vrijgeven.", variant: "destructive" });
+        toast({ title: "Fout", description: "Kon item niet vrijgeven.", variant: "destructive" , duration: 5000 });
       }
     }
   };
@@ -114,7 +114,7 @@ export default function Wishlist() {
   const handleAddItem = async (e) => {
     e.preventDefault();
     if (!newItem.name) {
-      toast({ title: "Naam is verplicht", variant: "destructive" });
+      toast({ title: "Naam is verplicht", variant: "destructive" , duration: 5000 });
       return;
     }
 
@@ -146,13 +146,13 @@ export default function Wishlist() {
         family_member_id: memberId
       });
 
-      toast({ title: "Item toegevoegd!", description: `${newItem.name} is toegevoegd aan de verlanglijst.` });
+      toast({ title: "Item toegevoegd!", description: `${newItem.name} is toegevoegd aan de verlanglijst.` , duration: 5000 });
       setNewItem({ name: '', url: '', price: '' });
       setShowAddForm(false);
       loadItems();
     } catch (e) {
       console.error("Fout bij toevoegen item:", e);
-      toast({ title: "Fout", description: "Kon item niet toevoegen.", variant: "destructive" });
+      toast({ title: "Fout", description: "Kon item niet toevoegen.", variant: "destructive" , duration: 5000 });
     } finally {
       setIsAdding(false);
     }
@@ -162,10 +162,10 @@ export default function Wishlist() {
     if (window.confirm(`Weet je zeker dat je dit item wilt verwijderen?`)) {
       try {
         await WishlistItem.delete(itemId);
-        toast({ title: "Item verwijderd", description: "Het item is verwijderd van de verlanglijst." });
+        toast({ title: "Item verwijderd", description: "Het item is verwijderd van de verlanglijst." , duration: 5000 });
         loadItems();
       } catch (e) {
-        toast({ title: "Fout", description: "Kon item niet verwijderen.", variant: "destructive" });
+        toast({ title: "Fout", description: "Kon item niet verwijderen.", variant: "destructive" , duration: 5000 });
       }
     }
   };
@@ -174,7 +174,8 @@ export default function Wishlist() {
     navigator.clipboard.writeText(window.location.href);
     toast({
       title: "Link gekopieerd!",
-      description: "De link naar deze verlanglijst is naar je klembord gekopieerd."
+      description: "De link naar deze verlanglijst is naar je klembord gekopieerd.",
+      duration: 5000 
     });
   };
 

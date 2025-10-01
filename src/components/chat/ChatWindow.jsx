@@ -10,6 +10,17 @@ import TasksReviewer from './TasksReviewer';
 import VacationEventsReview from './VacationEventsReview';
 import { Check } from "lucide-react";
 
+// ---- date helpers (robust to missing/legacy fields) ----
+const getMessageISO = (msg) =>
+  (msg && (msg.created_time || msg.created_at || msg.created_date)) || null;
+
+const getMessageDate = (msg) => {
+  const iso = getMessageISO(msg);
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
 export default function ChatWindow({ conversationId, participants }) {
   const [messages, setMessages] = useState([]);
   const [familyMembers, setFamilyMembers] = useState([]);
@@ -68,7 +79,7 @@ export default function ChatWindow({ conversationId, participants }) {
         const user = await User.me();
         let members = await FamilyMember.list();
 
-        // 🔁 SLIPPED-IN: get the authoritative current FamilyMember from backend
+        // authoritative current FamilyMember from backend
         const meAsMember = await FamilyMember.me();
         setCurrentUserMember(meAsMember);
 
@@ -112,20 +123,27 @@ export default function ChatWindow({ conversationId, participants }) {
         }
 
         // keep stable order (oldest→newest)
-        unique.sort((a, b) => new Date(a.created_date) - new Date(b.created_date));
+        unique.sort((a, b) => {
+          const da = getMessageDate(a);
+          const db = getMessageDate(b);
+          if (!da && !db) return 0;
+          if (!da) return -1;
+          if (!db) return 1;
+          return da - db;
+        });
 
         setMessages(unique);
         window.dispatchEvent(new CustomEvent('famly-chat-opened', { detail: { conversationId } }));
       } catch (error) {
         console.error("Chat initialization error:", error);
-        toast({ title: "Chat Error", description: "Could not initialize chat", variant: "destructive" });
+        toast({ title: "Chat Error", description: "Could not initialize chat", variant: "destructive", duration: 5000  });
       } finally {
         setIsLoading(false);
       }
     };
 
     loadChatData();
-  }, [conversationId]);
+  }, [conversationId, toast]);
 
   // WebSocket live updates
   useEffect(() => {
@@ -143,12 +161,13 @@ export default function ChatWindow({ conversationId, participants }) {
       const pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) ws.send("ping");
       }, 30000);
+      // @ts-ignore
       ws.pingInterval = pingInterval;
     };
 
     ws.onmessage = (event) => {
       try {
-        if (!event.data.startsWith("{")) return; // "pong" etc.
+        if (typeof event.data !== "string" || !event.data.startsWith("{")) return; // "pong" etc.
 
         const { type, payload } = JSON.parse(event.data);
 
@@ -164,7 +183,14 @@ export default function ChatWindow({ conversationId, participants }) {
               return prev;
             }
             const out = [...prev, payload];
-            out.sort((a, b) => new Date(a.created_date) - new Date(b.created_date));
+            out.sort((a, b) => {
+              const da = getMessageDate(a);
+              const db = getMessageDate(b);
+              if (!da && !db) return 0;
+              if (!da) return -1;
+              if (!db) return 1;
+              return da - db;
+            });
             return out;
           });
         }
@@ -176,10 +202,12 @@ export default function ChatWindow({ conversationId, participants }) {
     ws.onerror = (err) => console.error("⚠️ WebSocket error:", err);
 
     ws.onclose = () => {
+      // @ts-ignore
       if (ws.pingInterval) clearInterval(ws.pingInterval);
     };
 
     return () => {
+      // @ts-ignore
       if (ws.pingInterval) clearInterval(ws.pingInterval);
       ws.close();
     };
@@ -231,7 +259,7 @@ export default function ChatWindow({ conversationId, participants }) {
     } catch (error) {
       console.error("Error sending message:", error);
       setInputValue(content); // restore
-      toast({ title: "Send Failed", variant: "destructive" });
+      toast({ title: "Send Failed", variant: "destructive" , duration: 5000 });
     } finally {
       setIsSending(false);
     }
@@ -253,6 +281,11 @@ export default function ChatWindow({ conversationId, participants }) {
         .filter(m => m.family_id === currentUserFamilyId && m.role !== 'ai_assistant')
         .map(m => ({ id: m.id, name: m.name }));
 
+      const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone; // e.g. "Europe/Amsterdam"
+      const userTz = currentUserMember?.timezone || browserTz || "UTC";
+      const nowIso = new Date().toISOString();
+      const tzHint = userTz;
+
       const response = await InvokeLLM({
         prompt: `You are famly.ai, a helpful Dutch family assistant.
 
@@ -266,8 +299,11 @@ Regels:
 - Schrijf alle menselijke velden in het Nederlands (samenvatting, titels, beschrijvingen).
 - Gebruik ALLEEN bestaande family member IDs uit de lijst.
 - Kies bij voorkeur nabije datums/tijden (7–14 dagen) en geen verleden.
-- 24u notatie, ISO zonder tijdzone (YYYY-MM-DDTHH:MM:SS).
+- 24u notatie, ISO zonder tijdzone (YYYY-MM-DDTHH:MM:SS). Geen mm/dd formaat.
 - Als het vaag is: geef kleine, zekere acties. Liever weinig en goed.
+
+Heden (lokale tijd): ${nowIso} (${tzHint}).
+Interpreteer relatieve datums t.o.v. deze tijdzone en dit moment.
 
 Context:
 CHAT LOG:
@@ -380,15 +416,22 @@ Return exact JSON:
       });
 
       if ((tasks && tasks.length) || (events && events.length) || (wishlist && wishlist.length)) {
+        const eventsWithSelection = (events || []).map((e, idx) => ({
+          id: e.id || `event-${Date.now()}-${idx}`,  // stable key for the list
+          selected: true,                             // pre-select so the checkbox is on
+          ...e,
+        }));
+
         setPendingAction({
           tasks,
-          events,
+          events: eventsWithSelection,
           wishlist_items: wishlist,
           messageId: createdAiMessage.id
         });
       } else {
         toast({ title: "Geen acties", description: "De AI vond geen duidelijke acties op basis van dit gesprek.", duration: 5000 });
       }
+
     } catch (error) {
       console.error("AI action error:", error);
       toast({ title: "AI Error", description: "Kon geen suggesties ophalen.", variant: "destructive", duration: 5000 });
@@ -431,7 +474,6 @@ Return exact JSON:
           {messages.map((msg, index) => {
             const sender = getMember(msg.sender_id);
 
-            // 🔁 SLIPPED-IN: robust "is this my message?"
             const isCurrentUser =
               (currentUserMember?.id && msg.sender_id === currentUserMember.id) ||
               (sender?.id && currentUserMember?.id && sender.id === currentUserMember.id);
@@ -441,14 +483,25 @@ Return exact JSON:
 
             if (isAiIntroduction) {
               return (
-                <motion.div key={msg.id || index} layout initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="flex justify-center my-6">
+                <motion.div
+                  key={msg.id || index}
+                  layout
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex justify-center my-6"
+                >
                   <div className="bg-gradient-to-r from-green-100 to-emerald-100 border-2 border-green-300 rounded-xl px-6 py-4 max-w-md text-center shadow-lg">
                     <div className="flex items-center justify-center gap-2 mb-2">
                       <Bot className="w-5 h-5 text-green-600" />
                       <span className="font-semibold text-green-800">AI Assistent</span>
                     </div>
                     <p className="text-sm text-green-700">{msg.content}</p>
-                    <p className="text-xs text-green-600 mt-2">{new Date(msg.created_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                    <p className="text-xs text-green-600 mt-2">
+                      {(() => {
+                        const d = getMessageDate(msg);
+                        return d ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+                      })()}
+                    </p>
                   </div>
                 </motion.div>
               );
@@ -457,14 +510,15 @@ Return exact JSON:
             return (
               <motion.div key={msg.id || index} layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
                 <div className={`flex items-end gap-3 ${isCurrentUser ? 'justify-end' : ''}`}>
-                  {!isCurrentUser && sender && (
+                  {!isCurrentUser && sender ? (
                     <div
                       className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-semibold text-xs shrink-0 ${isAI ? 'bg-gradient-to-r from-green-500 to-emerald-500' : ''}`}
                       style={{ backgroundColor: isAI ? undefined : (sender.color || '#6b7280') }}
                     >
-                      {isAI ? <Bot className="w-4 h-4" /> : sender.name.charAt(0)}
+                      {isAI ? <Bot className="w-4 h-4" /> : (sender?.name || '?').charAt(0)}
                     </div>
-                  )}
+                  ) : null}
+
                   <div
                     className={`max-w-[80%] px-4 py-2 rounded-2xl ${
                       isCurrentUser
@@ -474,18 +528,22 @@ Return exact JSON:
                           : 'bg-white text-gray-800 rounded-bl-md shadow-sm border'
                     }`}
                   >
-                    {!isCurrentUser && sender && (
-                      <p className={`font-semibold text-xs mb-1 ${isAI ? 'text-green-600' : ''}`} style={{ color: isAI ? undefined : (sender.color || '#6b7280') }}>
+                    {!isCurrentUser && sender ? (
+                      <p
+                        className={`font-semibold text-xs mb-1 ${isAI ? 'text-green-600' : ''}`}
+                        style={{ color: isAI ? undefined : (sender.color || '#6b7280') }}
+                      >
                         {sender.name}
                       </p>
-                    )}
+                    ) : null}
+
                     <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
 
                     {(() => {
-                      const timestamp = new Date(msg.created_date);
-                      const timeString = isNaN(timestamp.getTime())
-                        ? null
-                        : timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      const d = getMessageDate(msg);
+                      const timeString = d
+                        ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        : null;
 
                       const seenBy = familyMembers.filter(
                         (m) =>
@@ -503,13 +561,13 @@ Return exact JSON:
 
                       return (
                         <div className="flex justify-end gap-1 mt-1 items-end">
-                          {timeString && (
+                          {timeString ? (
                             <p className={`text-xs ${isCurrentUser ? 'text-blue-100' : 'text-gray-500'}`}>
                               {timeString}
                             </p>
-                          )}
+                          ) : null}
 
-                          {seenBy.length > 0 && (
+                          {seenBy.length > 0 ? (
                             <div className="flex -space-x-1 ml-2">
                               {seenBy.map((member) => (
                                 <span key={member.id} title={`Seen by ${member.name}`} className="relative z-10">
@@ -519,9 +577,9 @@ Return exact JSON:
                                 </span>
                               ))}
                             </div>
-                          )}
+                          ) : null}
 
-                          {notSeenBy.length > 0 && (
+                          {notSeenBy.length > 0 ? (
                             <div className="flex -space-x-1 ml-1 opacity-50">
                               {notSeenBy.map((member) => (
                                 <span key={member.id} title={`Not yet seen by ${member.name}`} className="relative z-0">
@@ -531,30 +589,36 @@ Return exact JSON:
                                 </span>
                               ))}
                             </div>
-                          )}
+                          ) : null}
                         </div>
                       );
                     })()}
                   </div>
                 </div>
 
-                {pendingAction && msg.id === pendingAction.messageId && (
+                {pendingAction && msg.id === pendingAction.messageId ? (
                   <div className={`mt-2 ${isCurrentUser ? 'ml-auto' : 'ml-11'}`}>
-                    {pendingAction.tasks && pendingAction.tasks.length > 0 && (
+                    {pendingAction.tasks && pendingAction.tasks.length > 0 ? (
                       <TasksReviewer
                         tasks={pendingAction.tasks}
                         familyMembers={familyMembers}
                         onConfirm={(confirmed) => handleConfirmActions(confirmed, [], [])}
                         onCancel={() => setPendingAction(null)}
                       />
-                    )}
-                    {pendingAction.events && pendingAction.events.length > 0 && (
-                      <VacationEventsReview
-                        events={pendingAction.events}
-                        onConfirm={(confirmed) => handleConfirmActions([], confirmed, [])}
-                      />
-                    )}
-                    {pendingAction.wishlist_items && pendingAction.wishlist_items.length > 0 && (
+                    ) : null}
+
+                {pendingAction.events && pendingAction.events.length > 0 && (
+                  <VacationEventsReview
+                    events={pendingAction.events}
+                    onEventsUpdate={(updated) =>
+                      setPendingAction(prev => (prev ? { ...prev, events: updated } : prev))
+                    }
+                    onConfirm={(confirmed) => handleConfirmActions([], confirmed, [])}
+                    onCancel={() => setPendingAction(null)}
+                  />
+                )}
+
+                    {pendingAction.wishlist_items && pendingAction.wishlist_items.length > 0 ? (
                       <div className="p-3 bg-purple-50/50 border border-purple-200 rounded-lg shadow-sm space-y-2">
                         <h4 className="font-semibold text-sm text-purple-800">Wishlist Items:</h4>
                         {pendingAction.wishlist_items.map((item, i) => {
@@ -567,12 +631,18 @@ Return exact JSON:
                         })}
                         <div className="flex justify-end gap-2 pt-2">
                           <Button variant="ghost" size="sm" onClick={() => setPendingAction(null)}>Cancel</Button>
-                          <Button size="sm" onClick={() => handleConfirmActions([], [], pendingAction.wishlist_items)} className="bg-purple-600 hover:bg-purple-700">Add to Wishlist</Button>
+                          <Button
+                            size="sm"
+                            onClick={() => handleConfirmActions([], [], pendingAction.wishlist_items)}
+                            className="bg-purple-600 hover:bg-purple-700"
+                          >
+                            Add to Wishlist
+                          </Button>
                         </div>
                       </div>
-                    )}
+                    ) : null}
                   </div>
-                )}
+                ) : null}
               </motion.div>
             );
           })}

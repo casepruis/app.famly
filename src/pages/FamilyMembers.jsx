@@ -12,6 +12,9 @@ import { MoreHorizontal, Trash, Edit, Gift, MessageCircle, Bot, User as UserIcon
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import Joyride from "../components/common/Joyride";
 import { SendEmail } from "@/api/integrations";
+// add alongside your other UI imports
+import { Input } from "@/components/ui/input";
+
 
 const membersTourSteps = [
     { target: '.member-card-0', title: 'Family Member Card', content: 'Each family member has a card with their name and role. You can edit details, remove members, or chat with them from here.' },
@@ -32,6 +35,9 @@ export default function FamilyMembers() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingMember, setEditingMember] = useState(null);
   const [runTour, setRunTour] = useState(false);
+  const [isEditingFamilyName, setIsEditingFamilyName] = useState(false);
+  const [familyNameInput, setFamilyNameInput] = useState("");
+
 
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -101,12 +107,15 @@ export default function FamilyMembers() {
       setMembers(safeMembers);
       setInvitations(safeInvitations);
       setFamily(familyData); // Set family data
+      setFamilyNameInput(familyData?.name || "");
+
     } catch (error) {
       console.error("Error loading family members:", error);
       toast({
         title: t('error') || 'Error',
         description: t('couldNotLoadMembers') || 'Could not load family members',
-        variant: "destructive"
+        variant: "destructive", 
+        duration: 5000 
       });
       setMembers([]);
       setInvitations([]);
@@ -129,13 +138,14 @@ export default function FamilyMembers() {
     if (window.confirm(t('confirmDeleteMember') || 'Are you sure you want to delete this member?')) {
       try {
         await FamilyMember.delete(memberId);
-        toast({ title: t('memberDeleted') || 'Member deleted' });
+        toast({ title: t('memberDeleted') || 'Member deleted', duration: 5000 });
         loadMembers();
       } catch (error) {
         toast({ 
           title: t('error') || 'Error', 
           description: t('couldNotDeleteMember') || 'Could not delete member', 
-          variant: "destructive" 
+          variant: "destructive" , 
+          duration: 5000 
         });
       }
     }
@@ -152,11 +162,30 @@ export default function FamilyMembers() {
         toast({ 
           title: t('error') || 'Error', 
           description: t('couldNotCancelInvitation') || 'Could not cancel invitation', 
-          variant: "destructive" 
+          variant: "destructive" , 
+          duration: 5000 
         });
       }
     }
   };
+
+  const saveFamilyName = async () => {
+  try {
+    const user = await User.me();
+    if (!user?.family_id) return;
+
+    const updated = await Family.updateName(user.family_id, (familyNameInput || "").trim());
+    setFamily(updated);
+    setIsEditingFamilyName(false);
+    // optional toast
+    // toast({ title: 'Family name updated' });
+  } catch (e) {
+    // optional toast
+    // toast({ title: 'Error', description: 'Could not update family name', variant: 'destructive' });
+    console.error("Failed to update family name:", e);
+  }
+};
+
 
 const handleSave = async (memberData) => {
   try {
@@ -173,13 +202,13 @@ const handleSave = async (memberData) => {
     if (editingMember && editingMember.id) {
       console.log("Saving:", editingMember);
       await FamilyMember.update(editingMember.id, cleaned);
-      toast({ title: t('memberUpdated') || 'Member updated' });
+      toast({ title: t('memberUpdated') || 'Member updated', duration: 5000  });
     } else {
       await FamilyMember.create({
         ...cleaned,
         family_id: user.family_id,
       });
-      toast({ title: t('memberAdded') || 'Member added' });
+      toast({ title: t('memberAdded') || 'Member added', duration: 5000  });
     }
 
     loadMembers();
@@ -189,7 +218,8 @@ const handleSave = async (memberData) => {
     toast({
       title: t('error') || 'Error',
       description: t('couldNotSaveMember') || 'Could not save member',
-      variant: "destructive"
+      variant: "destructive", 
+      duration: 5000 
     });
   }
 };
@@ -203,7 +233,7 @@ const handleSave = async (memberData) => {
       // First add to whitelist
       await UserWhitelist.create({
         email: inviteData.email.toLowerCase(), // Normalize email
-        added_by: user.user_id,
+        added_by: user.email,
         status: 'active',
         notes: `Invited as ${inviteData.role} for ${inviteData.name}`
       });
@@ -212,7 +242,7 @@ const handleSave = async (memberData) => {
       await FamilyInvitation.create({
         email: inviteData.email,
         family_id: user.family_id,
-        invited_by: user.user_id,
+        invited_by: user.email,
         status: 'pending'
       });
 
@@ -228,6 +258,7 @@ const handleSave = async (memberData) => {
       toast({
         title: t('invitationSent') || 'Invitation sent',
         description: `${inviteData.email} has been invited and whitelisted.`,
+        duration: 5000 
       });
 
       loadMembers();
@@ -236,7 +267,8 @@ const handleSave = async (memberData) => {
       toast({ 
         title: t('error') || 'Error', 
         description: t('couldNotSendInvitation') || 'Could not send invitation', 
-        variant: "destructive" 
+        variant: "destructive" , 
+        duration: 5000 
       });
     }
   };
@@ -259,7 +291,8 @@ const handleSave = async (memberData) => {
         toast({
           title: t('noChangeNeeded') || 'No Change Needed',
           description: t('emailAlreadyPending') || 'This email is already pending for this member. No changes were made.',
-          variant: "default"
+          variant: "default", 
+          duration: 5000 
         });
         setIsDialogOpen(false);
         return;
@@ -283,7 +316,7 @@ const handleSave = async (memberData) => {
       // Add new email to whitelist
       await UserWhitelist.create({
         email: email.toLowerCase(), // Normalize email
-        added_by: user.user_id,
+        added_by: user.email,
         status: 'active',
         notes: `Connected to existing member ${member.name}`
       });
@@ -292,18 +325,21 @@ const handleSave = async (memberData) => {
       await FamilyInvitation.create({
         email: email,
         family_id: user.family_id,
-        invited_by: user.user_id,
+        invited_by: user.email,
         status: 'pending'
       });
 
       // Update member with new pending email
       await FamilyMember.update(member.id, {
-        pending_user_email: email
+        pending_user_email: email,
+        name: member.name,
+        role: member.role
       });
 
       toast({
         title: hasPendingEmail ? (t('invitationUpdated') || 'Invitation Updated') : (t('invitationSent') || 'Invitation Sent'),
         description: `${email} has been invited to connect to ${member.name}'s profile.`,
+        duration: 5000 
       });
 
       loadMembers();
@@ -313,7 +349,8 @@ const handleSave = async (memberData) => {
       toast({ 
         title: t('error') || 'Error', 
         description: hasPendingEmail ? (t('couldNotUpdateInvitation') || 'Could not update invitation') : (t('couldNotSendInvitation') || 'Could not send invitation'), 
-        variant: "destructive" 
+        variant: "destructive" , 
+        duration: 5000 
       });
     }
   };
@@ -323,12 +360,12 @@ const handleSave = async (memberData) => {
     try {
         oldConnectedUser = await User.get(member.user_id);
     } catch(e) {
-        toast({ title: t('error'), description: t('couldNotFindConnectedUser'), variant: 'destructive' });
+        toast({ title: t('error'), description: t('couldNotFindConnectedUser'), variant: 'destructive', duration: 5000  });
         return;
     }
     
-    if (oldConnectedUser && oldConnecteduser.user_id === newEmail) {
-        toast({ title: t('noChangeNeeded'), description: t('emailAlreadyConnected'), variant: 'default' });
+    if (oldConnectedUser && oldConnecteduser.email === newEmail) {
+        toast({ title: t('noChangeNeeded'), description: t('emailAlreadyConnected'), variant: 'default', duration: 5000  });
         return;
     }
 
@@ -338,10 +375,10 @@ const handleSave = async (memberData) => {
       const user = await User.me();
 
       // 1. Disconnect old user from family
-      await User.update(member.user_id, { family_id: null });
+      await User.update(member.email, { family_id: null });
 
       // 2. Find and properly update whitelist entry for the old user's email
-      const oldWhitelistEntries = await UserWhitelist.filter({ email: oldConnecteduser.user_id });
+      const oldWhitelistEntries = await UserWhitelist.filter({ email: oldConnecteduser.email });
       if (oldWhitelistEntries.length > 0) {
         for (const entry of oldWhitelistEntries) {
           await UserWhitelist.update(entry.id, { 
@@ -360,15 +397,16 @@ const handleSave = async (memberData) => {
       // 4. Whitelist and invite the new email
       await UserWhitelist.create({ 
         email: newEmail.toLowerCase(), // Normalize email
-        added_by: user.user_id, 
+        added_by: user.email, 
         status: 'active', 
         notes: `Invitation for ${member.name}` 
       });
-      await FamilyInvitation.create({ email: newEmail, family_id: user.family_id, invited_by: user.user_id, status: 'pending' });
+      await FamilyInvitation.create({ email: newEmail, family_id: user.family_id, invited_by: user.email, status: 'pending' });
       
       toast({
         title: t('invitationSent'),
         description: `Invitation sent to ${newEmail}. The previous user has been disconnected.`,
+        duration: 5000 
       });
 
       loadMembers();
@@ -379,54 +417,37 @@ const handleSave = async (memberData) => {
         title: t('error'),
         description: t('couldNotUpdateInvitation'),
         variant: "destructive",
+        duration: 5000 
       });
     }
   };
 
   const handleStartChat = async (otherMember) => {
-    if (!currentUserMember) {
-      toast({
-        title: t('error') || 'Error',
-        description: 'Cannot start chat - user profile not found',
-        variant: "destructive"
-      });
-      return;
-    }
-    
-    try {
-      const user = await User.me();
-      const existingConvos = await Conversation.filter({ family_id: user.family_id });
-      
-      // Ensure existingConvos is an array
-      const safeConvos = Array.isArray(existingConvos) ? existingConvos : [];
-      
-      const directChat = safeConvos.find(c => {
-        const participants = Array.isArray(c.participants) ? c.participants : [];
-        return participants.length === 2 && 
-               participants.includes(currentUserMember.id) && 
-               participants.includes(otherMember.id);
-      });
+  if (!currentUserMember) {
+    toast({
+      title: t('error') || 'Error',
+      description: 'Cannot start chat - user profile not found',
+      variant: "destructive",
+      duration: 5000 
+    });
+    return;
+  }
 
-      if (directChat) {
-        navigate(createPageUrl('Chat') + `?id=${directChat.id}`);
-      } else {
-        const convoName = `${currentUserMember.name} & ${otherMember.name}`;
-        const newConvo = await Conversation.create({
-          name: convoName,
-          family_id: user.family_id,
-          participants: [currentUserMember.id, otherMember.id]
-        });
-        navigate(createPageUrl('Chat') + `?id=${newConvo.id}`);
-      }
-    } catch (error) {
-      console.error("Error starting member chat:", error);
-      toast({
-        title: t('error') || 'Error',
-        description: 'Could not start chat',
-        variant: "destructive"
-      });
-    }
-  };
+  try {
+    // Ask backend to open existing DM or create if missing
+    const conv = await Conversation.dm(otherMember.id);
+    navigate(createPageUrl('Chat') + `?id=${conv.id}`);
+  } catch (error) {
+    console.error("Error starting member chat:", error);
+    toast({
+      title: t('error') || 'Error',
+      description: 'Could not start chat',
+      variant: "destructive",
+      duration: 5000 
+    });
+  }
+};
+
 
   const handleTourComplete = () => {
     setRunTour(false);
@@ -435,7 +456,7 @@ const handleSave = async (memberData) => {
 
   const handleResendInvitation = async (member) => {
     if (!member.pending_user_email || !family) {
-      toast({ title: t('error') || 'Error', description: t('missingDataToSendInvitation') || 'Missing data to send invitation.', variant: "destructive" });
+      toast({ title: t('error') || 'Error', description: t('missingDataToSendInvitation') || 'Missing data to send invitation.', variant: "destructive", duration: 5000  });
       return;
     }
 
@@ -443,6 +464,7 @@ const handleSave = async (memberData) => {
     toast({
       title: 'Sending Email...',
       description: `Preparing invitation for ${member.pending_user_email}`,
+      duration: 5000 
     });
 
     try {
@@ -484,6 +506,7 @@ const handleSave = async (memberData) => {
       toast({
         title: t('invitationSent') || 'Invitation Sent Successfully!',
         description: `Email sent to ${member.pending_user_email}. They should receive it shortly.`,
+        duration: 5000 
       });
 
     } catch (error) {
@@ -501,7 +524,8 @@ const handleSave = async (memberData) => {
       toast({ 
         title: 'Email Send Failed', 
         description: `Failed to send email to ${member.pending_user_email}. Error: ${error.message}`, 
-        variant: "destructive" 
+        variant: "destructive" , 
+        duration: 5000 
       });
     }
   };
@@ -518,7 +542,38 @@ const handleSave = async (memberData) => {
   return (
     <div className="p-6 max-w-4xl mx-auto">
         <Joyride steps={membersTourSteps} run={runTour} onComplete={handleTourComplete} />
-        
+        {/* Family name header / editor */}
+<div className="mb-8 p-4 bg-white rounded-xl shadow-sm border">
+  <div className="flex items-center justify-between gap-4">
+    <div>
+      <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Family name</p>
+      {!isEditingFamilyName ? (
+        <h1 className="text-2xl font-bold text-gray-900">{family?.name || "—"}</h1>
+      ) : (
+        <div className="flex items-center gap-3">
+          <Input
+            value={familyNameInput}
+            onChange={(e) => setFamilyNameInput(e.target.value)}
+            placeholder="Your family name"
+            className="max-w-xs"
+          />
+          <Button size="sm" onClick={saveFamilyName}>Save</Button>
+          <Button size="sm" variant="outline" onClick={() => { setIsEditingFamilyName(false); setFamilyNameInput(family?.name || ""); }}>
+            Cancel
+          </Button>
+        </div>
+      )}
+    </div>
+
+    {!isEditingFamilyName ? (
+      <Button size="sm" variant="outline" onClick={() => setIsEditingFamilyName(true)}>
+        <Edit className="mr-2 h-4 w-4" />
+        Edit
+      </Button>
+    ) : null}
+  </div>
+</div>
+
         <div className="space-y-8">
           <div>
             <div className="flex justify-between items-center mb-4">

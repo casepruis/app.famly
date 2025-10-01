@@ -34,6 +34,7 @@ export default function DatabaseRecovery() {
             toast({
                 title: "Account Reset Successful",
                 description: "Your family connection has been reset. Please log in again to start the setup.",
+                duration: 5000 
             });
 
             await User.logout();
@@ -45,6 +46,7 @@ export default function DatabaseRecovery() {
                 title: "Error",
                 description: "Could not reset your account. Please contact support.",
                 variant: "destructive",
+                duration: 5000 
             });
             setIsProcessing(false);
         }
@@ -63,6 +65,7 @@ export default function DatabaseRecovery() {
                 toast({
                     title: "Admin Rights Granted",
                     description: `You are now a family administrator for ${data.familyName || 'your family'}. Redirecting to Admin page.`,
+                    duration: 5000 
                 });
 
                 // Small delay before redirect to allow toast to show
@@ -75,6 +78,7 @@ export default function DatabaseRecovery() {
                     title: "Error",
                     description: data.error || "Could not grant admin rights. Please check console for details.",
                     variant: "destructive",
+                    duration: 5000 
                 });
                 console.error('Grant admin error:', data);
             }
@@ -95,6 +99,7 @@ export default function DatabaseRecovery() {
                 title: "Error",
                 description: errorMessage,
                 variant: "destructive",
+                duration: 5000 
             });
         } finally {
             setIsGrantingAdmin(false);

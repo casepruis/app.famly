@@ -101,11 +101,21 @@ export default function EventsPage() {
         ScheduleEvent.filter({ family_id: user.family_id }, '-start_time', 1000),
         FamilyMember.filter({ family_id: user.family_id })
       ]);
-      setEvents(eventsData);
+
+      const now = new Date();
+      const upcomingEvents = eventsData.filter((e) => {
+        const end = e?.end_time ? new Date(e.end_time) : null;
+        const start = e?.start_time ? new Date(e.start_time) : null;
+
+        // prefer end_time to keep ongoing events; fall back to start_time
+        const pivot = (end && !isNaN(end)) ? end : (start && !isNaN(start) ? start : null);
+        return pivot && pivot >= now;
+      });
+      setEvents(upcomingEvents);
       setFamilyMembers(membersData);
     } catch (error) {
       console.error("Error loading events:", error);
-      toast({ title: t('errorLoadingData'), variant: "destructive" });
+      toast({ title: t('errorLoadingData'), variant: "destructive", duration: 5000  });
     }
     setIsLoading(false);
   };

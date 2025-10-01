@@ -34,7 +34,8 @@ export default function MessageProcessor() {
     navigator.clipboard.writeText(text);
     toast({
       title: "Copied to clipboard",
-      description: "Webhook URL has been copied to your clipboard."
+      description: "Webhook URL has been copied to your clipboard.", 
+      duration: 5000 
     });
   };
 
@@ -96,7 +97,8 @@ export default function MessageProcessor() {
       toast({
         title: "Processing Failed",
         description: "There was an error processing your message.",
-        variant: "destructive"
+        variant: "destructive",
+        duration: 5000 
       });
     }
     setIsProcessing(false);

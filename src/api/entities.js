@@ -1,11 +1,31 @@
-// src/api/entities.js (or .ts if you're using TS)
+// src/api/entities.js
 import { authClient } from "./authClient";
 
 const API_BASE = "http://localhost:8000/";
 
-// src/api/entities.js (or .ts)
+// --- helpers ---
+const ensureTrailingSlash = (u) => {
+  // add a trailing slash before ?query (avoids FastAPI 307s on collection routes)
+  if (!u) return u;
+  const [p, q] = u.split("?");
+  if (!p.endsWith("/")) {
+    return q ? `${p}/?${q}` : `${p}/`;
+  }
+  return q ? `${p}?${q}` : p;
+};
+
+const buildQueryParams = (params = {}, orderBy = null, limit = null) => {
+  const q = new URLSearchParams();
+  Object.entries(params || {}).forEach(([k, v]) => {
+    if (v !== undefined && v !== null) q.append(k, v);
+  });
+  if (orderBy) q.append("order_by", orderBy);
+  if (limit) q.append("limit", String(limit));
+  return q.toString();
+};
+
 const fetchWithAuth = async (url, options = {}) => {
-  const token = authClient.getToken();
+  const token = authClient.getToken?.();
   const headers = {
     ...(options.headers || {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -16,58 +36,69 @@ const fetchWithAuth = async (url, options = {}) => {
 
   if (!res.ok) {
     let detail;
-    try { detail = await res.json(); } catch { detail = await res.text(); }
+    try {
+      detail = await res.json();
+    } catch {
+      detail = await res.text();
+    }
     const err = new Error(`API error: ${res.status}`);
     err.status = res.status;
     err.detail = detail;
     console.error("API error response:", detail);
     throw err;
   }
-  return res.json();
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("application/json") ? res.json() : res.text();
 };
 
-
-function buildQueryParams(params = {}, orderBy = null, limit = null) {
-  const query = new URLSearchParams();
-
-  for (const key in params) {
-    if (params[key] !== undefined && params[key] !== null) {
-      query.append(key, params[key]);
-    }
-  }
-
-  if (orderBy) query.append("order_by", orderBy);
-  if (limit) query.append("limit", limit);
-
-  return query.toString();
-}
-
-/* ---------------- Users ---------------- */
+// ---------- Users ----------
 export const User = {
+  // auth helpers (already implemented in your authClient)
   ...authClient,
   login: authClient.login,
   logout: authClient.logout,
   me: authClient.me,
+
+  checkEmail: (email) =>
+    fetchWithAuth(`api/auth/check-email?email=${encodeURIComponent(email)}`),
+
+  signup: (payload) =>
+    fetchWithAuth("api/auth/signup", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // preferences (adjust path if your backend differs)
+  updateMyUserData: (patch) =>
+    fetchWithAuth("api/users/me", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
 };
 
-/* ---------------- Tasks ---------------- */
+// ---------- Tasks ----------
 export const Task = {
+  list: () => fetchWithAuth(`api/tasks/all`),
   filter: (params = {}, orderBy = null, limit = null) => {
     const query = buildQueryParams(params, orderBy, limit);
-    return fetchWithAuth(`api/tasks${query ? `?${query}` : ""}`);
+    // collection → ensure trailing slash
+    return fetchWithAuth(
+      ensureTrailingSlash(`api/tasks${query ? `?${query}` : ""}`)
+    );
   },
 
   create: (data) => {
     const payload = { ...data };
-    // Don't send id for new tasks
     if (!payload.id) delete payload.id;
-    // Don't send empty due_date (let server infer)
-    if (payload.due_date === "" || payload.due_date == null) delete payload.due_date;
-    // Normalize assignees
+    if (payload.due_date === "" || payload.due_date == null)
+      delete payload.due_date;
     if (payload.assigned_to && !Array.isArray(payload.assigned_to)) {
       payload.assigned_to = [payload.assigned_to].flat().filter(Boolean);
     }
-    return fetchWithAuth("api/tasks/", { method: "POST", body: JSON.stringify(payload) });
+    return fetchWithAuth("api/tasks/", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
 
   update: (id, data) => {
@@ -76,173 +107,226 @@ export const Task = {
     if (payload.assigned_to && !Array.isArray(payload.assigned_to)) {
       payload.assigned_to = [payload.assigned_to].flat().filter(Boolean);
     }
-    return fetchWithAuth(`api/tasks/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+    return fetchWithAuth(`api/tasks/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
   },
 
   delete: (id) => fetchWithAuth(`api/tasks/${id}`, { method: "DELETE" }),
+
+  bulkCreate: async (tasks = []) => {
+    const results = [];
+    for (const t of tasks) {
+      // eslint-disable-next-line no-await-in-loop
+      results.push(await Task.create(t));
+    }
+    return results;
+  },
 };
 
-/* ---------------- Schedule Events ---------------- */
-const toIsoString = (v) => {
-  if (!v) return v;
-  if (v instanceof Date) return v.toISOString();
-  // if it's already a string, trust it
-  return v;
-};
+// ---------- Schedule Events ----------
 const VALID_EVENT_CATEGORIES = new Set([
-  "school", "work", "sports", "medical", "social", "family", "other", "holiday", "studyday", "outing"
+  "school",
+  "work",
+  "sports",
+  "medical",
+  "social",
+  "family",
+  "other",
+  "holiday",
+  "studyday",
+  "outing",
 ]);
 
-function normalizeOutgoingDate(value, { end = false } = {}) {
+const normalizeOutgoingDate = (value, { end = false } = {}) => {
   if (!value) return value;
-
-  // If it's a Date instance -> send ISO (backend will parse)
   if (value instanceof Date) return value.toISOString();
-
   if (typeof value === "string") {
-    // If it already includes timezone info, keep as-is
-    if (/[zZ]|[+\-]\d{2}:\d{2}$/.test(value)) return value;
-
-    // Date-only -> expand to local 00:00 or 23:59, keep naive (no Z)
+    if (/[zZ]|[+\-]\d{2}:\d{2}$/.test(value)) return value; // already tz-aware
     if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
       return end ? `${value}T23:59:00` : `${value}T00:00:00`;
     }
-
-    // Datetime without timezone -> keep as-is (naive local)
-    // e.g. "2025-09-01T08:00:00"
-    return value;
+    return value; // naive local datetime string
   }
-
-  // Fallback: try Date coercion
   const d = new Date(value);
-  return isNaN(d.getTime()) ? value : d.toISOString();
-}
+  return Number.isNaN(d.getTime()) ? value : d.toISOString();
+};
 
 const sanitizeEventPayload = (e) => {
   const payload = { ...e };
-
   payload.start_time = normalizeOutgoingDate(payload.start_time, { end: false });
-  payload.end_time   = normalizeOutgoingDate(payload.end_time,   { end: true  });
-
+  payload.end_time = normalizeOutgoingDate(payload.end_time, { end: true });
   if (!Array.isArray(payload.family_member_ids)) {
-    payload.family_member_ids = payload.family_member_ids ? [payload.family_member_ids].flat() : [];
+    payload.family_member_ids = payload.family_member_ids
+      ? [payload.family_member_ids].flat()
+      : [];
   }
-
   if (payload.category && !VALID_EVENT_CATEGORIES.has(payload.category)) {
     payload.category = "other";
   }
-
   return payload;
 };
 
 export const ScheduleEvent = {
-  filter: () => fetchWithAuth("api/schedule_events"),
-  upcoming: async () => {
-    const all = await fetchWithAuth("api/schedule_events");
-    const now = new Date();
-    return all
-      .filter((e) => new Date(e.start_time) > now)
-      .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
-      .slice(0, 5);
+  list: () => fetchWithAuth(`api/schedule_events`),
+  filter: (params = {}, orderBy = null, limit = 1000) => {
+    const query = buildQueryParams(params, orderBy, limit);
+    return fetchWithAuth(
+      ensureTrailingSlash(`api/schedule_events${query ? `?${query}` : ""}`)
+    );
   },
 
-  /** Create a single event (POST /api/schedule_events/) */
-  create: async (data) => {
+  get: (id) => fetchWithAuth(`api/schedule_events/${id}`),
+
+  create: (data) => {
     const payload = sanitizeEventPayload(data);
-    // ⚠️ FastAPI route is @router.post("/") → include trailing slash
     return fetchWithAuth("api/schedule_events/", {
       method: "POST",
       body: JSON.stringify(payload),
     });
   },
 
-  /** Convenience: create many events sequentially and collect results */
+  update: (id, data) => {
+    const payload = sanitizeEventPayload(data);
+    return fetchWithAuth(`api/schedule_events/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  delete: (id) => fetchWithAuth(`api/schedule_events/${id}`, { method: "DELETE" }),
+
   bulkCreate: async (events = []) => {
     const results = [];
     for (const e of events) {
-      // Fail fast if any required field is obviously missing
-      if (!e || !e.title || !e.start_time || !e.end_time || !e.family_id) {
-        console.warn("Skipping invalid event in bulkCreate:", e);
-        continue;
-      }
-      // Create one-by-one so we can surface partial success
-      // (If you later add a backend bulk endpoint, swap to that here.)
       // eslint-disable-next-line no-await-in-loop
-      const created = await ScheduleEvent.create(e);
-      results.push(created);
+      results.push(await ScheduleEvent.create(e));
     }
     return results;
   },
+
+  upcoming: async () => {
+    const all = await fetchWithAuth("api/schedule_events/");
+    const now = new Date();
+    return all
+      .filter((e) => new Date(e.start_time) > now)
+      .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
+      .slice(0, 5);
+  },
 };
 
-/* ---------------- Family Members ---------------- */
+// ---------- Family Members ----------
 export const FamilyMember = {
   list: () => fetchWithAuth("api/family_members/"),
-  filter: () => fetchWithAuth("api/family_members/"),
+
+  filter: (params = {}, orderBy = null, limit = null) => {
+    const query = buildQueryParams(params, orderBy, limit);
+    return fetchWithAuth(
+      ensureTrailingSlash(`api/family_members${query ? `?${query}` : ""}`)
+    );
+  },
+
   get: (id) => fetchWithAuth(`api/family_members/${id}`),
+
   me: () => fetchWithAuth("api/family_members/me"),
+
   create: (data) =>
     fetchWithAuth("api/family_members/", {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
   update: (id, data) =>
     fetchWithAuth(`api/family_members/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     }),
-  delete: (id) =>
-    fetchWithAuth(`api/family_members/${id}`, {
-      method: "DELETE",
+
+  delete: (id) => fetchWithAuth(`api/family_members/${id}`, { method: "DELETE" }),
+};
+
+// ---------- Family ----------
+export const Family = {
+  get: (id) => fetchWithAuth(`api/families/${id}`),
+  list: () => fetchWithAuth(`api/families/all`),
+  updateName: (id, name) =>
+    fetchWithAuth(`api/families/${id}/name`, {
+      method: "PUT",
+      body: JSON.stringify({ name }),
     }),
 };
 
-/* ---------------- Family ---------------- */
-export const Family = {
-  get: (id) => fetchWithAuth(`api/families/${id}`),
-};
-
-/* ---------------- Conversations ---------------- */
+// ---------- Conversations ----------
 export const Conversation = {
   filter: (params = {}, orderBy = null, limit = null) => {
     const query = buildQueryParams(params, orderBy, limit);
-    return fetchWithAuth(`api/conversations${query ? `?${query}` : ""}`);
+    return fetchWithAuth(
+      ensureTrailingSlash(`api/conversations${query ? `?${query}` : ""}`)
+    );
   },
+
   get: (id) => fetchWithAuth(`api/conversations/${id}`),
+
+  create: (data) =>
+    fetchWithAuth("api/conversations/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  /** Server will open existing (exact same participants) or create a new one */
+  openOrCreate: ({ participant_member_ids, title, type } = {}) =>
+    fetchWithAuth("api/conversations/open_or_create", {
+      method: "POST",
+      body: JSON.stringify({ participant_member_ids, title, type }),
+    }),
+
+  /** Open/create a 1:1 DM with the given member id */
+  dm: (memberId) =>
+    fetchWithAuth(`api/conversations/dm/${memberId}`, {
+      method: "POST",
+    }),
+
   update: (id, data) =>
     fetchWithAuth(`api/conversations/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     }),
+
   markAsRead: (conversationId) =>
     fetchWithAuth(`api/chat_messages/conversation/${conversationId}/mark_read`, {
       method: "POST",
     }),
 };
 
-/* ---------------- Chat Messages ---------------- */
+
+// ---------- Chat Messages ----------
 export const ChatMessage = {
   filter: (params = {}, orderBy = null, limit = null) => {
     const query = buildQueryParams(params, orderBy, limit);
-    return fetchWithAuth(`api/chat_messages${query ? `?${query}` : ""}`);
+    return fetchWithAuth(
+      ensureTrailingSlash(`api/chat_messages${query ? `?${query}` : ""}`)
+    );
   },
   get: (id) => fetchWithAuth(`api/chat_messages/${id}`),
   create: (data) =>
-    fetchWithAuth("api/chat_messages", {
+    fetchWithAuth("api/chat_messages/", {
       method: "POST",
       body: JSON.stringify(data),
     }),
   delete: (id) =>
-    fetchWithAuth(`api/conversations/${id}`, {
+    fetchWithAuth(`api/chat_messages/${id}`, {
       method: "DELETE",
     }),
 };
 
-/* ---------------- Wishlist Items ---------------- */
+// ---------- Wishlist Items ----------
 export const WishlistItem = {
   filter: (params = {}) => {
     const query = buildQueryParams(params);
-    return fetchWithAuth(`api/wishlist_items/${query ? `?${query}` : ""}`); // ← note the /
+    return fetchWithAuth(
+      ensureTrailingSlash(`api/wishlist_items${query ? `?${query}` : ""}`)
+    );
   },
   create: (data) =>
     fetchWithAuth("api/wishlist_items/", {
@@ -254,16 +338,57 @@ export const WishlistItem = {
       method: "PUT",
       body: JSON.stringify(data),
     }),
-  delete: (id) =>
-    fetchWithAuth(`api/wishlist_items/${id}`, {
-      method: "DELETE",
-    }),
+  delete: (id) => fetchWithAuth(`api/wishlist_items/${id}`, { method: "DELETE" }),
+  bulkCreate: async (items = []) => {
+  const results = [];
+  for (const t of items) {
+    // eslint-disable-next-line no-await-in-loop
+    results.push(await WishlistItem.create(t));
+  }
+  return results;
+},
 };
-/* ---------------- Misc ---------------- */
+
+// ---------- Misc ----------
 export const UserWhitelist = {
-  filter: () => fetchWithAuth("api/user_whitelist"),
+  list: () => fetchWithAuth("api/user_whitelist/"),
+  filter: () => fetchWithAuth("api/user_whitelist/"),
+  create: (data) => {
+    const payload = sanitizeEventPayload(data);
+    return fetchWithAuth("api/user_whitelist/", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  update: (email, status) => {
+    return fetchWithAuth(`api/user_whitelist/${encodeURIComponent(email)}?status=${encodeURIComponent(status)}`, {
+      method: "PUT",
+    });
+  },
+
 };
 
 export const FamilyInvitation = {
-  filter: () => fetchWithAuth("api/family_invitations"),
+  create: (data) => {
+    // Build a clean payload (do NOT run sanitizeEventPayload here)
+    const payload = {
+      email: (data.email || '').toLowerCase(),
+      family_id: data.family_id,
+    };
+    if (data.status) payload.status = data.status; // optional, defaults to 'pending' server-side
+    if (data.invited_by) payload.invited_by = data.invited_by; // optional; server defaults to current user
+
+    return fetchWithAuth('api/family_invitations/', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      headers: { 'Content-Type': 'application/json' }, // add if your wrapper doesn’t set it
+    });
+  },
+
+  list: () => fetchWithAuth('api/family_invitations/'),
+
+  filter: (params) => {
+    const qs = params ? `?${new URLSearchParams(params).toString()}` : '';
+    return fetchWithAuth(`api/family_invitations/${qs}`);
+  },
 };

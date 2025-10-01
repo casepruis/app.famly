@@ -17,7 +17,8 @@ import { useToast } from "@/components/ui/use-toast";
 
 
 // Hardcoded list of platform administrators
-const PLATFORM_ADMINS = ["kees.pruis@gmail.com"];
+import logo from '@/assets/famly_kama_icon.svg';
+
 
 function LanguageSelector() {
   const { currentLanguage, updateUserLanguage } = useLanguage();
@@ -43,6 +44,7 @@ function LanguageSelector() {
     </Select>
   );
 }
+
 
 function UserAvatar({ user, family }) {
   const { t } = useLanguage();
@@ -397,11 +399,10 @@ function LayoutContent({ children, currentPageName }) {
 
   const adminNavItems = useMemo(() => {
     const items = [];
-    if (currentUser?.role === 'admin') {
+    if (currentUser?.is_family_admin) {
       items.push({ title: t('admin') || 'Admin', url: createPageUrl("Admin"), icon: Settings });
     }
-    // Explicitly check for the platform admin email
-    if (currentUser && PLATFORM_ADMINS.includes(currentUser.user_id)) {
+    if (currentUser?.is_platform_admin) {
       items.push({ title: 'Platform Admin', url: createPageUrl("PlatformAdmin"), icon: HardDrive });
     }
     return items;
@@ -471,6 +472,7 @@ function LayoutContent({ children, currentPageName }) {
           }
         `}
       </style>
+
       <div className="min-h-screen flex w-full" style={{backgroundColor: 'var(--famly-bg)'}}>
         {isSidebarVisible && currentUser && (
           <Sidebar className="border-r bg-white" style={{borderColor: 'var(--famly-accent)'}}>
@@ -478,7 +480,7 @@ function LayoutContent({ children, currentPageName }) {
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-white rounded-2xl flex items-center justify-center shadow-lg transform rotate-3 p-2">
                   <img 
-                    src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/52181febd_Screenshot_20250703_092323_Chrome.jpg" 
+                    src={logo}
                     alt="famly.ai Logo" 
                     className="w-full h-full object-contain" 
                   />

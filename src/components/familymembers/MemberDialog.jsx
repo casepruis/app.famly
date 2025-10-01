@@ -43,7 +43,7 @@ export default function MemberDialog({ isOpen, onClose, member, onSave, onInvite
 
   const isEditing = !!member;
   const isAI = member?.role === 'ai_assistant';
-  const hasUserAccount = !!member?.user_id;
+  const hasUserAccount = !!member?.email;
   const hasPendingEmail = !!member?.pending_user_email;
 
   useEffect(() => {

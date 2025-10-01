@@ -318,7 +318,7 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
 
         } catch(error) {
             console.error("Error processing event:", error);
-            toast({ title: t('processingFailed') || 'Processing failed', description: t('unexpectedErrorOccurred') || 'An unexpected error occurred. Please try again.', variant: "destructive" });
+            toast({ title: t('processingFailed') || 'Processing failed', description: t('unexpectedErrorOccurred') || 'An unexpected error occurred. Please try again.', variant: "destructive", duration: 5000  });
         } finally {
             setIsProcessing(false);
         }

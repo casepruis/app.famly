@@ -95,7 +95,8 @@ export default function Admin() {
 
       toast({
         title: t('invitationSent') || 'Uitnodiging verzonden',
-        description: `${inviteEmail} is uitgenodigd om lid te worden van je Famly.`,
+        description: `${inviteEmail} is uitgenodigd om lid te worden van je Famly.`, 
+        duration: 5000 
       });
 
       setInviteEmail('');
@@ -104,7 +105,8 @@ export default function Admin() {
       toast({
         title: t('invitationFailed') || 'Uitnodiging mislukt',
         description: t('couldNotSendInvitation') || 'Kon uitnodiging niet verzenden. Probeer opnieuw.',
-        variant: 'destructive'
+        variant: 'destructive', 
+        duration: 5000 
       });
     } finally {
       setIsInviting(false);
@@ -125,7 +127,8 @@ export default function Admin() {
       toast({
         title: t('deleteFailed') || 'Verwijderen mislukt',
         description: t('couldNotDeleteInvitation') || 'Kon uitnodiging niet verwijderen.',
-        variant: 'destructive'
+        variant: 'destructive', 
+        duration: 5000 
       });
     }
   };
@@ -136,13 +139,15 @@ export default function Admin() {
       toast({
         title: t('settingsUpdated') || 'Settings Updated',
         description: t('famlySettingsSaved') || 'Famly settings have been saved.',
+        duration: 5000 
       });
       loadData();
     } catch (error) {
       toast({
         title: t('updateFailed') || 'Update Failed',
         description: t('couldNotUpdateSettings') || 'Could not update settings.',
-        variant: 'destructive'
+        variant: 'destructive',
+        duration: 5000 
       });
     }
   };
@@ -155,7 +160,8 @@ export default function Admin() {
         toast({
           title: t('error') || 'Error',
           description: t('cannotPromoteNoUser') || 'Cannot promote member - no connected user account.',
-          variant: 'destructive'
+          variant: 'destructive', 
+          duration: 5000 
         });
         return;
       }
@@ -166,6 +172,7 @@ export default function Admin() {
       toast({
         title: t('memberPromoted') || 'Member Promoted',
         description: `${member.name} ${t('isNowAdmin') || 'is now a famly administrator'}.`,
+        duration: 5000 
       });
 
       loadData();
@@ -173,7 +180,8 @@ export default function Admin() {
       toast({
         title: t('promotionFailed') || 'Promotion Failed',
         description: t('couldNotPromoteMember') || 'Could not promote member to admin.',
-        variant: 'destructive'
+        variant: 'destructive', 
+        duration: 5000 
       });
     }
   };
@@ -193,7 +201,8 @@ export default function Admin() {
       toast({
         title: t('paymentFailed') || 'Betaling mislukt',
         description: t('couldNotInitiatePayment') || 'Kon betaling niet initiëren.',
-        variant: 'destructive'
+        variant: 'destructive', 
+        duration: 5000 
       });
     }
   };

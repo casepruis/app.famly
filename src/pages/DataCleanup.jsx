@@ -26,6 +26,7 @@ export default function DataCleanup() {
       toast({
         title: 'Success!',
         description: data.message,
+        duration: 5000 
       });
 
     } catch (err) {
@@ -34,6 +35,7 @@ export default function DataCleanup() {
         title: 'Error',
         description: `Cleanup failed: ${err.message}`,
         variant: 'destructive',
+        duration: 5000 
       });
     } finally {
       setIsLoading(false);

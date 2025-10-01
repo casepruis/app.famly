@@ -26,10 +26,6 @@ import { deleteFamily } from "@/api/functions";
 // Define platform administrators' emails for access control
 // In a real application, this would typically come from a secure configuration,
 // environment variables, or a database, not hardcoded.
-const PLATFORM_ADMINS = [
-    // Add admin emails here, e.g., "admin@example.com", "another.admin@example.com"
-    "kees.pruis@gmail.com"
-];
 
 export default function PlatformAdmin() {
   const [whitelistedUsers, setWhitelistedUsers] = useState([]);
@@ -57,31 +53,30 @@ export default function PlatformAdmin() {
     const checkAccess = async () => {
       try {
         const user = await User.me();
-        // Check if the current user's email is in the list of PLATFORM_ADMINS
-        if (!user || !PLATFORM_ADMINS.includes(user.user_id)) {
-          // If not an admin, redirect to the Dashboard
+        if (!user?.is_platform_admin) {
           toast({
             title: t('accessDenied') || 'Access Denied',
             description: t('youDoNotHavePermissionToAccessThisPage') || 'You do not have permission to access this page.',
             variant: 'destructive',
+            duration: 5000 
           });
           navigate(createPageUrl("Dashboard"));
         } else {
-          // If admin, load the platform data
           loadData();
         }
       } catch (error) {
-        // If there's an error fetching user (e.g., not logged in), redirect to Index
         toast({
           title: t('authenticationRequired') || 'Authentication Required',
           description: t('pleaseLogInToAccessThisPage') || 'Please log in to access this page.',
           variant: 'destructive',
+          duration: 5000 
         });
         navigate(createPageUrl("Index"));
       }
     };
     checkAccess();
-  }, [navigate, t, toast]); // Add toast to dependency array
+  }, [navigate, t, toast]);
+
 
   const loadData = async () => {
     setIsLoading(true);
@@ -116,7 +111,7 @@ export default function PlatformAdmin() {
       });
     } catch (error) {
       console.error('Error loading platform data:', error);
-      toast({ title: t('error'), description: t('couldNotLoadPlatformData'), variant: 'destructive' });
+      toast({ title: t('error'), description: t('couldNotLoadPlatformData'), variant: 'destructive', duration: 5000  });
     } finally {
       setIsLoading(false);
     }
@@ -131,7 +126,7 @@ export default function PlatformAdmin() {
       const currentUser = await User.me();
       await UserWhitelist.create({
         email: newUserEmail.toLowerCase(), // Normalize email
-        added_by: currentuser.user_id,
+        added_by: currentUser.email,
         notes: newUserNotes || null,
         status: 'active'
       });
@@ -139,6 +134,7 @@ export default function PlatformAdmin() {
       toast({
         title: t('userAdded'),
         description: `User ${newUserEmail} added to platform`,
+        duration: 5000 
       });
 
       setNewUserEmail('');
@@ -148,28 +144,33 @@ export default function PlatformAdmin() {
       toast({
         title: t('addFailed'),
         description: t('couldNotAddUser'),
-        variant: 'destructive'
+        variant: 'destructive',
+        duration: 5000 
       });
     } finally {
       setIsAdding(false);
     }
   };
 
-  const handleRevokeUser = async (userId) => {
+  const handleRevokeUser = async (email) => {
     if (!window.confirm('Are you sure you want to revoke access for this user?')) return;
 
     try {
-      await UserWhitelist.update(userId, { status: 'revoked' });
+      await UserWhitelist.update(email.toLowerCase(), 'revoked')
+
+      // await UserWhitelist.update(email, { status: 'revoked' });
       toast({
         title: 'Access Revoked',
         description: 'User access has been revoked',
+        duration: 5000 
       });
       loadData();
     } catch (error) {
       toast({
         title: 'Revoke Failed',
         description: 'Could not revoke access',
-        variant: 'destructive'
+        variant: 'destructive',
+        duration: 5000 
       });
     }
   };
@@ -185,11 +186,13 @@ export default function PlatformAdmin() {
       }
 
       // Update the record, ensuring the email is lowercase
-      await UserWhitelist.update(userId, {
-        email: userToReactivate.email.toLowerCase(), // This is the critical fix
-        status: 'active',
-        notes: `Reactivated on ${new Date().toLocaleDateString()}`
-      });
+      // await UserWhitelist.update(userId, {
+      //   email: userToReactivate.email.toLowerCase(), // This is the critical fix
+      //   status: 'active',
+      //   notes: `Reactivated on ${new Date().toLocaleDateString()}`
+      // });
+      await UserWhitelist.update(userToReactivate.email.toLowerCase(), 'active')
+      
 
       toast({
         title: 'Access Reactivated',
@@ -201,7 +204,8 @@ export default function PlatformAdmin() {
       toast({
         title: 'Reactivation Failed',
         description: 'Could not reactivate access',
-        variant: 'destructive'
+        variant: 'destructive',
+        duration: 5000 
       });
     }
   };
@@ -215,13 +219,15 @@ export default function PlatformAdmin() {
       toast({
         title: 'User Deleted',
         description: 'User has been removed from the whitelist.',
+        duration: 5000 
       });
       loadData();
     } catch (error) {
       toast({
         title: 'Delete Failed',
         description: 'Could not delete user.',
-        variant: 'destructive'
+        variant: 'destructive',
+        duration: 5000 
       });
     } finally {
       setDeletingId(null);
@@ -236,14 +242,16 @@ export default function PlatformAdmin() {
       await deleteFamily({ family_id: family.id });
       toast({
         title: "Family Deleted",
-        description: `The family "${family.name}" has been permanently deleted.`
+        description: `The family "${family.name}" has been permanently deleted.`,
+        duration: 5000 
       });
       loadData();
     } catch (error) {
        toast({
         title: "Delete Failed",
         description: `Could not delete family. Error: ${error.message}`,
-        variant: 'destructive'
+        variant: 'destructive',
+        duration: 5000 
       });
     } finally {
       setDeletingId(null);
@@ -260,7 +268,8 @@ export default function PlatformAdmin() {
         toast({
           title: 'Error',
           description: 'Family not found',
-          variant: 'destructive'
+          variant: 'destructive',
+          duration: 5000 
         });
         return;
       }
@@ -275,7 +284,8 @@ export default function PlatformAdmin() {
         toast({
           title: 'Error',
           description: 'Family creator not found in users',
-          variant: 'destructive'
+          variant: 'destructive',
+          duration: 5000 
         });
         return;
       }
@@ -286,6 +296,7 @@ export default function PlatformAdmin() {
       toast({
         title: 'Admin Rights Granted',
         description: `${family.created_by} has been granted admin rights for ${family.name}`,
+        duration: 5000 
       });
 
       loadData();
@@ -293,7 +304,8 @@ export default function PlatformAdmin() {
       toast({
         title: 'Failed to Grant Admin Rights',
         description: 'Could not grant admin rights',
-        variant: 'destructive'
+        variant: 'destructive',
+        duration: 5000 
       });
     }
   };
@@ -434,7 +446,7 @@ export default function PlatformAdmin() {
                   whitelistedUsers.map((user) => (
                     <div key={user.id} className="flex items-center justify-between py-3 px-4 bg-gray-50 rounded-lg">
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-gray-900 truncate">{user.user_id}</p>
+                        <p className="font-medium text-gray-900 truncate">{user.email}</p>
                         <div className="flex items-center gap-2 mt-1">
                           <p className="text-sm text-gray-500">Added by {user.added_by}</p>
                           <Badge variant={user.status === 'active' ? 'default' : 'secondary'}>
@@ -454,7 +466,7 @@ export default function PlatformAdmin() {
                                 <Button
                                   size="icon"
                                   variant="ghost"
-                                  onClick={() => handleRevokeUser(user.id)}
+                                  onClick={() => handleRevokeUser(user.email)}
                                   className="h-8 w-8 text-yellow-600 hover:text-yellow-700 flex-shrink-0"
                                   title="Revoke Access"
                                 >
@@ -465,7 +477,7 @@ export default function PlatformAdmin() {
                                 <Button
                                   size="icon"
                                   variant="ghost"
-                                  onClick={() => handleReactivateUser(user.id)}
+                                  onClick={() => handleReactivateUser(user.email)}
                                   className="h-8 w-8 text-green-600 hover:text-green-700 flex-shrink-0"
                                   title="Reactivate Access"
                                 >
