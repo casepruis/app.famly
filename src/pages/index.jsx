@@ -36,18 +36,32 @@ const BASE = resolveApiBase();
 
 
 // Helper to normalize Google email addresses
+// const normalizeGoogleEmail = (email) => {
+//   const lowerEmail = (email || '').toLowerCase();
+//   if (lowerEmail.endsWith('@gmail.com') || lowerEmail.endsWith('@googlemail.com')) {
+//     const [local] = lowerEmail.split('@');
+//     const domainPart = 'gmail.com';
+//     let localPart = local.replace(/\./g, '');
+//     const plusIndex = localPart.indexOf('+');
+//     if (plusIndex !== -1) localPart = localPart.substring(0, plusIndex);
+//     return `${localPart}@${domainPart}`;
+//   }
+//   return lowerEmail;
+// };
+
 const normalizeGoogleEmail = (email) => {
   const lowerEmail = (email || '').toLowerCase();
   if (lowerEmail.endsWith('@gmail.com') || lowerEmail.endsWith('@googlemail.com')) {
     const [local] = lowerEmail.split('@');
     const domainPart = 'gmail.com';
-    let localPart = local.replace(/\./g, '');
-    const plusIndex = localPart.indexOf('+');
-    if (plusIndex !== -1) localPart = localPart.substring(0, plusIndex);
+    // ✏️ Keep dots — just remove anything after '+'
+    const plusIndex = local.indexOf('+');
+    const localPart = plusIndex !== -1 ? local.substring(0, plusIndex) : local;
     return `${localPart}@${domainPart}`;
   }
   return lowerEmail;
 };
+
 
 // Store these in canonical/normalized form for Google emails
 const PLATFORM_ADMINS = ['kees.pruis@siliconbrain.nl'];
@@ -77,8 +91,6 @@ export default function Index() {
   const [selectedFamilyId, setSelectedFamilyId] = useState('');
   const [familyName, setFamilyName] = useState(''); // for whitelist created family
 
-  const normalizedPlatformAdmins = PLATFORM_ADMINS.map(normalizeGoogleEmail);
-
   const checkUserSetup = useCallback(async () => {
     await new Promise((r) => setTimeout(r, 300));
     try {
@@ -106,7 +118,7 @@ export default function Index() {
       }
 
       const normalizedUserEmail = normalizeGoogleEmail(me.user_id || '');
-      if (!normalizedPlatformAdmins.includes(normalizedUserEmail)) {
+      if (!me.is_platform_admin) {
         setStatus('Checking access permissions...');
         const whitelistEntries = await UserWhitelist.filter({ email: normalizedUserEmail });
         const hasActiveEntry = Array.isArray(whitelistEntries) && whitelistEntries.some((e) => e.status === 'active');
@@ -135,7 +147,7 @@ export default function Index() {
     } finally {
       setHasChecked(true);
     }
-  }, [navigate, normalizedPlatformAdmins]);
+  }, [navigate]);
 
   useEffect(() => {
     if (!hasChecked) checkUserSetup();

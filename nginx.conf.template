@@ -1,0 +1,71 @@
+worker_processes 1;
+
+events { worker_connections 1024; }
+
+http {
+  map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+  }
+  include       mime.types;
+  default_type  application/octet-stream;
+  sendfile      on;
+  keepalive_timeout  65;
+
+  # Gzip + sensible cache for static assets
+  gzip on;
+  gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+  gzip_min_length 1024;
+
+  server {
+    # ACA auto-discovers this port; we expose 8080 in the Dockerfile
+    listen 8080;
+
+    # --- SPA static files
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Try static first; fallback to index.html for client routing
+    location / {
+      try_files $uri $uri/ /index.html;
+    }
+
+    # --- Optional: proxy API calls to your backend (adjust the URL!)
+    # Example: http://backend.internal:8000
+    location /api/ {
+      proxy_pass ${API_URL};              # e.g. https://famly-backend.internal...  (NO trailing slash)
+      proxy_http_version 1.1;
+
+      # 🔑 Route & TLS: use the upstream host for both Host and SNI
+      proxy_set_header Host $proxy_host;
+      proxy_ssl_server_name on;
+      proxy_ssl_name $proxy_host;
+
+      # Forward usual headers
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+
+      # Timeouts (optional)
+      proxy_read_timeout 60s;
+    }
+
+    location /ws {
+      proxy_pass ${API_URL}/ws;          # ${API_URL} = https://<backend-fqdn>
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection $connection_upgrade;
+
+      # keep Host/SNI aligned with upstream (important for ACA + TLS)
+      proxy_set_header Host $proxy_host;
+      proxy_ssl_server_name on;
+      proxy_ssl_name $proxy_host;
+
+      # Optional hardening/timeouts
+      proxy_read_timeout 3600s;
+      proxy_send_timeout 3600s;
+      proxy_buffering off;
+    }
+
+  }
+}

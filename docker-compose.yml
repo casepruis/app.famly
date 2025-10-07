@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: famly-fe:local
+    container_name: famly-fe
+    environment:
+      # Point FE’s /api proxy to your backend
+      # If backend runs locally outside Docker, use host.docker.internal
+      API_URL: "http://host.docker.internal:8000"
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

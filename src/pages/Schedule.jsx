@@ -1,7 +1,10 @@
 // src/pages/Schedule.jsx
 import React, { useState, useEffect, useMemo } from "react";
 import { ScheduleEvent, FamilyMember, User, Task } from "@/api/entities";
-import { addDays, parseISO, addWeeks, addMonths, addYears, getHours } from "date-fns";
+import {
+  addDays, addWeeks, addMonths, addYears, getHours,
+  parseISO, startOfDay, endOfDay
+} from "date-fns";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { useLanguage } from "@/components/common/LanguageProvider";
@@ -110,7 +113,7 @@ export default function Schedule() {
   const [dashboardFavorite, setDashboardFavorite] = useState(null);
   const [isMembersSidebarOpen, setIsMembersSidebarOpen] = useState(false);
   const [familyId, setFamilyId] = useState(null);
-
+  
   const navigate = useNavigate();
   const { t } = useLanguage();
   const { toast } = useToast();
@@ -483,12 +486,35 @@ Category: "${eventData.category || ""}"`,
     });
   }, [events, selectedMembers, familyMembers]);
 
+  // Helper: stable YYYY-MM-DD for a Date in the user's TZ
+  const makeDayKey = (tz) => {
+    const fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit"
+    });
+    return (d) => fmt.format(d); // e.g. "2025-10-06"
+  };
+
+  // Grab the user's tz once (profile → browser → UTC)
+  const userTimezone =
+    (typeof user !== "undefined" && (user.timezone || user.time_zone)) ||
+    Intl.DateTimeFormat().resolvedOptions().timeZone ||
+    "UTC";
+
+  const dayKey = makeDayKey(userTimezone);
+  const todayKey = dayKey(new Date());
+
   const todayEvents = filteredEvents.filter((event) => {
     if (!event.start_time) return false;
     try {
-      const eventDate = parseISO(event.start_time);
-      const today = new Date();
-      return eventDate.toDateString() === today.toDateString();
+      const start = parseISO(event.start_time);
+      const end = event.end_time ? parseISO(event.end_time) : new Date(start.getTime() + 60_000);
+
+      const startKey = dayKey(start);
+      const endKey = dayKey(end);
+
+      // Overlap in calendar days within user's TZ:
+      // include if today is between start and end (inclusive)
+      return startKey <= todayKey && todayKey <= endKey;
     } catch {
       return false;
     }

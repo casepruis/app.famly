@@ -112,6 +112,16 @@ function LayoutContent({ children, currentPageName }) {
   const lastMessageIdsRef = useRef({}); // Ref to track last message IDs for all convos
   // const pollingIntervalRef = useRef(null); // Ref to hold the interval ID
 
+  // WS infra
+  const wsRef = useRef(null);
+  const pingRef = useRef(null);
+  const retryRef = useRef(0);
+
+  // Keep volatile values in refs so the WS effect doesn't re-run on every render
+  const conversationsRef = useRef([]);           // instead of useRef(conversations)
+  const meRef = useRef(null);                    // instead of useRef(currentFamilyMember)
+  const notifyRef = useRef(null);                // must be null to avoid TDZ
+
   // Function to handle showing notifications
   const showNotification = useCallback((conversationId, conversationName, senderName, messageContent) => {
   const urlParams = new URLSearchParams(window.location.search);
@@ -151,11 +161,11 @@ function LayoutContent({ children, currentPageName }) {
   }
 
   // In-app toast (already auto-dismisses via duration)
-  toast({
-    title: `${senderName} in ${conversationName}`,
-    description: messageContent.substring(0, 50) + (messageContent.length > 50 ? '...' : ''),
-    duration: 5000,
-  });
+  // toast({
+  //   title: `${senderName} in ${conversationName}`,
+  //   description: messageContent.substring(0, 50) + (messageContent.length > 50 ? '...' : ''),
+  //   duration: 5000,
+  // });
 
   // 🔵 Auto-clear sidebar badge after 5s unless user opened the chat
   setTimeout(() => {
@@ -172,7 +182,10 @@ function LayoutContent({ children, currentPageName }) {
     }
   }, 5000);
 }, [navigate, toast]);
- // Added navigate and toast to dependencies for useCallback
+  // Added navigate and toast to dependencies for useCallback
+useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
+useEffect(() => { meRef.current = currentFamilyMember; }, [currentFamilyMember]);
+useEffect(() => { notifyRef.current = showNotification; }, [showNotification]);
 
   useEffect(() => {
     // Request notification permission on app load
@@ -324,50 +337,88 @@ function LayoutContent({ children, currentPageName }) {
     const token = localStorage.getItem("famlyai_token");
     if (!token) return;
 
-    const ws = new WebSocket(`ws://localhost:8000/ws?token=${token}`);
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const host = window.location.host;
+    const WS_BASE = (import.meta)?.env?.VITE_WS_BASE || `${protocol}//${host}`;
 
-    ws.onopen = () => {
-      console.log("📡 Layout WebSocket connected");
-    };
+    let closed = false;
 
-    ws.onmessage = async (event) => {
-      try {
-        const { type, payload } = JSON.parse(event.data);
+    const connect = () => {
+      if (closed) return;
 
-        if (type === "chat_message_created") {
-          const message = payload;
+      const ws = new WebSocket(`${WS_BASE}/ws?token=${encodeURIComponent(token)}`);
+      wsRef.current = ws;
 
-          if (message.sender_id === currentFamilyMember.id) return;
+      ws.onopen = () => {
+        console.log("📡 Layout WebSocket connected");
+        retryRef.current = 0;
 
-          const convo = conversations.find(c => c.id === message.conversation_id);
-          if (!convo) return;
+        // keepalive ping every 30s
+        if (pingRef.current) clearInterval(pingRef.current);
+        pingRef.current = window.setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) ws.send("ping");
+        }, 30000);
+      };
 
-          const sender = await FamilyMember.get(message.sender_id);
+      ws.onmessage = async (event) => {
+        if (typeof event.data !== "string" || event.data[0] !== "{") return; // ignore "pong"/non-JSON
 
-          // 🔔 Show notifications (same as your `showNotification()` logic)
-          showNotification(
-            message.conversation_id,
-            convo.name,
-            sender?.name || "Unknown",
-            message.content
-          );
+        try {
+          const { type, payload } = JSON.parse(event.data);
 
-          // 🔵 Update sidebar badge
-          setNotificationCounts(prev => ({
-            ...prev,
-            [message.conversation_id]: (prev[message.conversation_id] || 0) + 1
-          }));
+          if (type === "chat_message_created") {
+            const message = payload;
+
+            // suppress self-notifications
+            if (message.sender_id === meRef.current?.id) return;
+
+            const convo = conversationsRef.current.find(c => c.id === message.conversation_id);
+            if (!convo) return;
+
+            let senderName = "Unknown";
+            try {
+              const sender = await FamilyMember.get(message.sender_id);
+              senderName = sender?.name || senderName;
+            } catch {}
+
+            notifyRef.current(
+              message.conversation_id,
+              convo.name,
+              senderName,
+              message.content
+            );
+          }
+        } catch (err) {
+          console.error("WebSocket message error in Layout:", err);
         }
-      } catch (err) {
-        console.error("WebSocket message error in Layout:", err);
-      }
+      };
+
+      ws.onerror = (e) => {
+        console.warn("Layout WebSocket error; readyState=", ws.readyState, e);
+      };
+
+      ws.onclose = (e) => {
+        if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+        if (closed) return;
+
+        console.warn("Layout WebSocket closed:", e.code, e.reason || "(no reason)");
+
+        // exponential backoff up to 30s
+        const delay = Math.min(30000, 1000 * Math.pow(2, retryRef.current++));
+        setTimeout(connect, delay);
+      };
     };
 
-    ws.onerror = (err) => console.error("Layout WebSocket error:", err);
-    ws.onclose = () => console.warn("Layout WebSocket closed");
+    connect();
 
-    return () => ws.close();
-  }, [currentUser, family, currentFamilyMember, conversations, showNotification]);
+    return () => {
+      closed = true;
+      if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
+      try { wsRef.current?.close(); } catch {}
+      wsRef.current = null;
+    };
+  // Keep deps minimal so we don't create duplicate connections on every render.
+  }, [currentUser, family, currentFamilyMember]);
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {

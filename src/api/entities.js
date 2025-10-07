@@ -1,7 +1,13 @@
 // src/api/entities.js
 import { authClient } from "./authClient";
 
-const API_BASE = "http://localhost:8000/";
+// const API_BASE = "http://localhost:8000/";
+
+const API_BASE =
+  (typeof window !== "undefined" && window.__API_BASE) // set by index.html at runtime (optional)
+  || (import.meta?.env?.VITE_API_BASE)                // Vite build-time (optional)
+  || "/api";                                          // default: same-origin; nginx proxies to backend
+
 
 // --- helpers ---
 const ensureTrailingSlash = (u) => {
@@ -60,17 +66,17 @@ export const User = {
   me: authClient.me,
 
   checkEmail: (email) =>
-    fetchWithAuth(`api/auth/check-email?email=${encodeURIComponent(email)}`),
+    fetchWithAuth(`/auth/check-email?email=${encodeURIComponent(email)}`),
 
   signup: (payload) =>
-    fetchWithAuth("api/auth/signup", {
+    fetchWithAuth("/auth/signup", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
   // preferences (adjust path if your backend differs)
   updateMyUserData: (patch) =>
-    fetchWithAuth("api/users/me", {
+    fetchWithAuth("/users/me", {
       method: "PUT",
       body: JSON.stringify(patch),
     }),
@@ -78,12 +84,12 @@ export const User = {
 
 // ---------- Tasks ----------
 export const Task = {
-  list: () => fetchWithAuth(`api/tasks/all`),
+  list: () => fetchWithAuth(`/tasks/all`),
   filter: (params = {}, orderBy = null, limit = null) => {
     const query = buildQueryParams(params, orderBy, limit);
     // collection → ensure trailing slash
     return fetchWithAuth(
-      ensureTrailingSlash(`api/tasks${query ? `?${query}` : ""}`)
+      ensureTrailingSlash(`/tasks${query ? `?${query}` : ""}`)
     );
   },
 
@@ -95,7 +101,7 @@ export const Task = {
     if (payload.assigned_to && !Array.isArray(payload.assigned_to)) {
       payload.assigned_to = [payload.assigned_to].flat().filter(Boolean);
     }
-    return fetchWithAuth("api/tasks/", {
+    return fetchWithAuth("/tasks/", {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -107,13 +113,13 @@ export const Task = {
     if (payload.assigned_to && !Array.isArray(payload.assigned_to)) {
       payload.assigned_to = [payload.assigned_to].flat().filter(Boolean);
     }
-    return fetchWithAuth(`api/tasks/${id}`, {
+    return fetchWithAuth(`/tasks/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),
     });
   },
 
-  delete: (id) => fetchWithAuth(`api/tasks/${id}`, { method: "DELETE" }),
+  delete: (id) => fetchWithAuth(`/tasks/${id}`, { method: "DELETE" }),
 
   bulkCreate: async (tasks = []) => {
     const results = [];
@@ -169,19 +175,19 @@ const sanitizeEventPayload = (e) => {
 };
 
 export const ScheduleEvent = {
-  list: () => fetchWithAuth(`api/schedule_events`),
+  list: () => fetchWithAuth(`/schedule_events`),
   filter: (params = {}, orderBy = null, limit = 1000) => {
     const query = buildQueryParams(params, orderBy, limit);
     return fetchWithAuth(
-      ensureTrailingSlash(`api/schedule_events${query ? `?${query}` : ""}`)
+      ensureTrailingSlash(`/schedule_events${query ? `?${query}` : ""}`)
     );
   },
 
-  get: (id) => fetchWithAuth(`api/schedule_events/${id}`),
+  get: (id) => fetchWithAuth(`/schedule_events/${id}`),
 
   create: (data) => {
     const payload = sanitizeEventPayload(data);
-    return fetchWithAuth("api/schedule_events/", {
+    return fetchWithAuth("/schedule_events/", {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -189,13 +195,13 @@ export const ScheduleEvent = {
 
   update: (id, data) => {
     const payload = sanitizeEventPayload(data);
-    return fetchWithAuth(`api/schedule_events/${id}`, {
+    return fetchWithAuth(`/schedule_events/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),
     });
   },
 
-  delete: (id) => fetchWithAuth(`api/schedule_events/${id}`, { method: "DELETE" }),
+  delete: (id) => fetchWithAuth(`/schedule_events/${id}`, { method: "DELETE" }),
 
   bulkCreate: async (events = []) => {
     const results = [];
@@ -207,7 +213,7 @@ export const ScheduleEvent = {
   },
 
   upcoming: async () => {
-    const all = await fetchWithAuth("api/schedule_events/");
+    const all = await fetchWithAuth("/schedule_events/");
     const now = new Date();
     return all
       .filter((e) => new Date(e.start_time) > now)
@@ -218,40 +224,40 @@ export const ScheduleEvent = {
 
 // ---------- Family Members ----------
 export const FamilyMember = {
-  list: () => fetchWithAuth("api/family_members/"),
+  list: () => fetchWithAuth("/family_members/"),
 
   filter: (params = {}, orderBy = null, limit = null) => {
     const query = buildQueryParams(params, orderBy, limit);
     return fetchWithAuth(
-      ensureTrailingSlash(`api/family_members${query ? `?${query}` : ""}`)
+      ensureTrailingSlash(`/family_members${query ? `?${query}` : ""}`)
     );
   },
 
-  get: (id) => fetchWithAuth(`api/family_members/${id}`),
+  get: (id) => fetchWithAuth(`/family_members/${id}`),
 
-  me: () => fetchWithAuth("api/family_members/me"),
+  me: () => fetchWithAuth("/family_members/me"),
 
   create: (data) =>
-    fetchWithAuth("api/family_members/", {
+    fetchWithAuth("/family_members/", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
   update: (id, data) =>
-    fetchWithAuth(`api/family_members/${id}`, {
+    fetchWithAuth(`/family_members/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     }),
 
-  delete: (id) => fetchWithAuth(`api/family_members/${id}`, { method: "DELETE" }),
+  delete: (id) => fetchWithAuth(`/family_members/${id}`, { method: "DELETE" }),
 };
 
 // ---------- Family ----------
 export const Family = {
-  get: (id) => fetchWithAuth(`api/families/${id}`),
-  list: () => fetchWithAuth(`api/families/all`),
+  get: (id) => fetchWithAuth(`/families/${id}`),
+  list: () => fetchWithAuth(`/families/all`),
   updateName: (id, name) =>
-    fetchWithAuth(`api/families/${id}/name`, {
+    fetchWithAuth(`/families/${id}/name`, {
       method: "PUT",
       body: JSON.stringify({ name }),
     }),
@@ -262,39 +268,39 @@ export const Conversation = {
   filter: (params = {}, orderBy = null, limit = null) => {
     const query = buildQueryParams(params, orderBy, limit);
     return fetchWithAuth(
-      ensureTrailingSlash(`api/conversations${query ? `?${query}` : ""}`)
+      ensureTrailingSlash(`/conversations${query ? `?${query}` : ""}`)
     );
   },
 
-  get: (id) => fetchWithAuth(`api/conversations/${id}`),
+  get: (id) => fetchWithAuth(`/conversations/${id}`),
 
   create: (data) =>
-    fetchWithAuth("api/conversations/", {
+    fetchWithAuth("/conversations/", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
   /** Server will open existing (exact same participants) or create a new one */
   openOrCreate: ({ participant_member_ids, title, type } = {}) =>
-    fetchWithAuth("api/conversations/open_or_create", {
+    fetchWithAuth("/conversations/open_or_create", {
       method: "POST",
       body: JSON.stringify({ participant_member_ids, title, type }),
     }),
 
   /** Open/create a 1:1 DM with the given member id */
   dm: (memberId) =>
-    fetchWithAuth(`api/conversations/dm/${memberId}`, {
+    fetchWithAuth(`/conversations/dm/${memberId}`, {
       method: "POST",
     }),
 
   update: (id, data) =>
-    fetchWithAuth(`api/conversations/${id}`, {
+    fetchWithAuth(`/conversations/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     }),
 
   markAsRead: (conversationId) =>
-    fetchWithAuth(`api/chat_messages/conversation/${conversationId}/mark_read`, {
+    fetchWithAuth(`/chat_messages/conversation/${conversationId}/mark_read`, {
       method: "POST",
     }),
 };
@@ -305,17 +311,17 @@ export const ChatMessage = {
   filter: (params = {}, orderBy = null, limit = null) => {
     const query = buildQueryParams(params, orderBy, limit);
     return fetchWithAuth(
-      ensureTrailingSlash(`api/chat_messages${query ? `?${query}` : ""}`)
+      ensureTrailingSlash(`/chat_messages${query ? `?${query}` : ""}`)
     );
   },
-  get: (id) => fetchWithAuth(`api/chat_messages/${id}`),
+  get: (id) => fetchWithAuth(`/chat_messages/${id}`),
   create: (data) =>
-    fetchWithAuth("api/chat_messages/", {
+    fetchWithAuth("/chat_messages/", {
       method: "POST",
       body: JSON.stringify(data),
     }),
   delete: (id) =>
-    fetchWithAuth(`api/chat_messages/${id}`, {
+    fetchWithAuth(`/chat_messages/${id}`, {
       method: "DELETE",
     }),
 };
@@ -325,20 +331,20 @@ export const WishlistItem = {
   filter: (params = {}) => {
     const query = buildQueryParams(params);
     return fetchWithAuth(
-      ensureTrailingSlash(`api/wishlist_items${query ? `?${query}` : ""}`)
+      ensureTrailingSlash(`/wishlist_items${query ? `?${query}` : ""}`)
     );
   },
   create: (data) =>
-    fetchWithAuth("api/wishlist_items/", {
+    fetchWithAuth("/wishlist_items/", {
       method: "POST",
       body: JSON.stringify(data),
     }),
   update: (id, data) =>
-    fetchWithAuth(`api/wishlist_items/${id}`, {
+    fetchWithAuth(`/wishlist_items/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     }),
-  delete: (id) => fetchWithAuth(`api/wishlist_items/${id}`, { method: "DELETE" }),
+  delete: (id) => fetchWithAuth(`/wishlist_items/${id}`, { method: "DELETE" }),
   bulkCreate: async (items = []) => {
   const results = [];
   for (const t of items) {
@@ -351,17 +357,17 @@ export const WishlistItem = {
 
 // ---------- Misc ----------
 export const UserWhitelist = {
-  list: () => fetchWithAuth("api/user_whitelist/"),
-  filter: () => fetchWithAuth("api/user_whitelist/"),
+  list: () => fetchWithAuth("/user_whitelist/"),
+  filter: () => fetchWithAuth("/user_whitelist/"),
   create: (data) => {
     const payload = sanitizeEventPayload(data);
-    return fetchWithAuth("api/user_whitelist/", {
+    return fetchWithAuth("/user_whitelist/", {
       method: "POST",
       body: JSON.stringify(payload),
     });
   },
   update: (email, status) => {
-    return fetchWithAuth(`api/user_whitelist/${encodeURIComponent(email)}?status=${encodeURIComponent(status)}`, {
+    return fetchWithAuth(`/user_whitelist/${encodeURIComponent(email)}?status=${encodeURIComponent(status)}`, {
       method: "PUT",
     });
   },
@@ -378,17 +384,17 @@ export const FamilyInvitation = {
     if (data.status) payload.status = data.status; // optional, defaults to 'pending' server-side
     if (data.invited_by) payload.invited_by = data.invited_by; // optional; server defaults to current user
 
-    return fetchWithAuth('api/family_invitations/', {
+    return fetchWithAuth('/family_invitations/', {
       method: 'POST',
       body: JSON.stringify(payload),
       headers: { 'Content-Type': 'application/json' }, // add if your wrapper doesn’t set it
     });
   },
 
-  list: () => fetchWithAuth('api/family_invitations/'),
+  list: () => fetchWithAuth('/family_invitations/'),
 
   filter: (params) => {
     const qs = params ? `?${new URLSearchParams(params).toString()}` : '';
-    return fetchWithAuth(`api/family_invitations/${qs}`);
+    return fetchWithAuth(`/family_invitations/${qs}`);
   },
 };

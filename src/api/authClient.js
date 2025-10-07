@@ -1,5 +1,11 @@
 // src/api/authClient.js
-const API_BASE = "http://localhost:8000/api";
+// const API_BASE = "http://localhost:8000/api";
+
+// Prefer runtime-injected base from nginx (window.__API_BASE), then build-time env, then same-origin '/api'
+const API_BASE =
+  (typeof window !== "undefined" && window.__API_BASE) // set by index.html at runtime (optional)
+  || (import.meta?.env?.VITE_API_BASE)                // Vite build-time (optional)
+  || "/api";                                          // default: same-origin; nginx proxies to backend
 
 // ---- URL normalization (optional trailing slash control) ----
 const withTrailingSlash = (path) => {

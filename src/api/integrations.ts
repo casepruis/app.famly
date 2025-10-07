@@ -1,8 +1,21 @@
 // src/api/integrations.ts
 import { authClient } from "./authClient";
 
+// Tell TypeScript that window may have __API_BASE injected at runtime
+declare global {
+  interface Window {
+    __API_BASE?: string;
+  }
+}
+
+
 // Prefer env, fall back to localhost (Vite example)
-const API_BASE = "http://localhost:8000";
+// const API_BASE = "http://localhost:8000";
+const API_BASE: string =
+  (typeof window !== "undefined" && window.__API_BASE) ||
+  (import.meta as any)?.env?.VITE_API_BASE ||
+  "/api";
+
 
 const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
   const token = authClient.getToken();
@@ -86,7 +99,7 @@ export const getLLMEstimatedCost = (res?: InvokeLLMResponse) =>
 export const InvokeLLM = async (
   body: InvokeLLMRequest
 ): Promise<InvokeLLMResponse> => {
-  return fetchWithAuth("api/integrations/invoke_llm", {
+  return fetchWithAuth("/integrations/invoke_llm", {
     method: "POST",
     body: JSON.stringify(body),
   });
