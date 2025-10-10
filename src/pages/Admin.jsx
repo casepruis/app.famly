@@ -121,6 +121,7 @@ export default function Admin() {
       toast({
         title: t('invitationDeleted') || 'Uitnodiging verwijderd',
         description: t('invitationRemoved') || 'De uitnodiging is verwijderd.',
+        duration: 5000
       });
       loadData();
     } catch (error) {

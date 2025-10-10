@@ -18,7 +18,7 @@ export default function RealGmailConnector({ onBack }) {
 
   const copyCode = () => {
     navigator.clipboard.writeText(BACKEND_CODE_SNIPPET);
-    toast({ title: "Code Copied!", description: "The placeholder code has been copied to your clipboard.", duration: 5000  });
+  toast({ title: "Code Copied!", description: "The placeholder code has been copied to your clipboard.", duration: 5000  });
   };
 
   return (

@@ -133,7 +133,7 @@ export default function Schedule() {
     setDashboardFavorite(newFavorite);
     try {
       await User.updateMyUserData({ dashboard_favorite_view: newFavorite });
-      toast({
+  toast({ duration: 5000,
         title: newFavorite ? t("dashboardFavoriteSet") || "Dashboard favorite set" : t("dashboardFavoriteRemoved") || "Dashboard favorite removed",
         description: newFavorite
           ? `${calendarView === "weekly" ? t("weekly") : t("byMember")} view will be used on dashboard`
@@ -317,7 +317,7 @@ Category: "${eventData.category || ""}"`,
             updateData.recurrence_id = null;
           }
           await ScheduleEvent.update(initialEvent.id, updateData);
-          toast({
+          toast({ duration: 5000,
             title: t("eventUpdated"),
             description:
               t("eventUpdatedDescription", { title: finalEventData.title }) +
@@ -341,7 +341,7 @@ Category: "${eventData.category || ""}"`,
           await Task.bulkCreate(tasksPayload);
         }
 
-        toast({
+  toast({ duration: 5000,
           title: t("eventSaved"),
           description:
             t("eventSavedDescription", { title: finalEventData.title }) +
@@ -351,7 +351,7 @@ Category: "${eventData.category || ""}"`,
       }
     } catch (error) {
       console.error("Error during final save:", error);
-      toast({ title: t("saveFailed"), description: t("somethingWentWrong"), variant: "destructive", duration: 5000  });
+  toast({ title: t("saveFailed"), description: t("somethingWentWrong"), variant: "destructive", duration: 5000  });
     } finally {
       setIsReviewDialogOpen(false);
       setReviewData(null);
@@ -386,7 +386,7 @@ Category: "${eventData.category || ""}"`,
             await ScheduleEvent.delete(seriesEvent.id);
           }
 
-          toast({
+          toast({ duration: 5000,
             title: t("seriesDeleted"),
             description: t("seriesDeletedDescription", { title: event.title, count: deletedTasksCount }),
           });
@@ -530,6 +530,8 @@ Category: "${eventData.category || ""}"`,
           onTimeSlotClick={handleTimeSlotClick}
           initialDate={currentViewDate}
           key={currentViewDate.getTime()}
+          onEditEvent={handleEventClick}
+          onDeleteEvent={handleDeleteEvent}
         />
       ) : (
         <ResourceCalendar

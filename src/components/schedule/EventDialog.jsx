@@ -221,6 +221,8 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
         is_recurring: false,
         recurrence_pattern: 'weekly',
     });
+    // Spinner for AI calls
+    const [aiLoading, setAiLoading] = useState(false);
 
     const locale = useMemo(() => locales[currentLanguage] || undefined, [currentLanguage]);
     const isRecurringEvent = initialData && initialData.recurrence_id && !initialData.is_series_exception;
@@ -289,18 +291,29 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
             return;
         }
 
-        setIsProcessing(true);
+    setIsProcessing(true);
+    setAiLoading(true);
 
         try {
             // Combine date and time into proper datetime strings
             const startDateTime = new Date(`${eventData.start_date}T${eventData.start_time}`);
             const endDateTime = new Date(`${eventData.end_date}T${eventData.end_time}`);
-            
+
             let processedEventData = {
                 ...eventData,
                 start_time: startDateTime.toISOString(),
                 end_time: endDateTime.toISOString(),
             };
+
+            // Ensure family_id is present for new events
+            if (!initialData || !initialData.id) {
+                if (!processedEventData.family_id) {
+                    const user = await User.me();
+                    if (user && user.family_id) {
+                        processedEventData.family_id = user.family_id;
+                    }
+                }
+            }
 
             // Generate short title with AI, but don't block saving if it fails
             const shortTitle = await generateShortTitleWithAI(processedEventData, currentLanguage);
@@ -309,18 +322,19 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
             }
 
             const aiResult = await analyzeEventWithAI(processedEventData, familyMembers, currentLanguage);
-            
+
             // Determine edit type based on whether this is an update or create
             const editType = initialData ? (showRecurringOptions ? 'series' : 'single') : 'single';
-            
+
             // Always call onSave, which will handle whether to show the review dialog or not
             onSave(processedEventData, aiResult, editType);
 
         } catch(error) {
             console.error("Error processing event:", error);
-            toast({ title: t('processingFailed') || 'Processing failed', description: t('unexpectedErrorOccurred') || 'An unexpected error occurred. Please try again.', variant: "destructive", duration: 5000  });
+            toast({ title: t('processingFailed') || 'Processing failed', description: t('unexpectedErrorOccurred') || 'An unexpected error occurred. Please try again.', variant: "destructive", duration: 5000 });
         } finally {
             setIsProcessing(false);
+            setAiLoading(false);
         }
     };
 
@@ -377,10 +391,16 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
             <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
+                {aiLoading && (
+                    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/80">
+                        <Loader2 className="w-8 h-8 mr-2 animate-spin text-blue-600" />
+                        <div className="mt-2 text-blue-700 font-semibold text-lg">FamlyAI is trying to help...</div>
+                    </div>
+                )}
                 <DialogHeader className="flex-shrink-0">
                     <DialogTitle className="flex items-center gap-2 text-lg font-semibold">
                         <Calendar className="w-5 h-5" />
-                        {initialData ? (t('editEvent') || 'Edit event') : (t('addNewEvent') || 'Add new event')}
+                        {initialData && initialData.id ? (t('editEvent') || 'Edit event') : (t('addNewEvent') || 'Add new event')}
                         {isRecurringEvent && (
                             <div className="flex items-center gap-1 bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs">
                                 <Repeat className="w-3 h-3" />
@@ -388,6 +408,12 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
                             </div>
                         )}
                     </DialogTitle>
+                                        {/* Only show delete button for existing events (with id) */}
+                                                                                {onDelete && initialData && initialData.id && typeof initialData.id === 'string' && initialData.id.trim() !== '' && (
+                                                                                    <Button variant="ghost" size="sm" className="absolute top-2 right-2 text-red-500" onClick={() => onDelete(initialData)}>
+                                                                                        <Trash2 className="w-4 h-4" />
+                                                                                    </Button>
+                                                                                )}
                 </DialogHeader>
 
                 <div className="flex-1 overflow-y-auto pr-2">
@@ -612,7 +638,7 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
 
                         <div className="flex justify-between gap-3 pt-4 border-t pb-4">
                             <div>
-                                {initialData && onDelete && (
+                                {onDelete && initialData && initialData.id && typeof initialData.id === 'string' && initialData.id.trim() !== '' && (
                                     <Button type="button" variant="destructive" onClick={handleDelete} className="gap-1">
                                         <Trash2 className="w-4 h-4" /> {t('deleteEvent') || 'Delete event'}
                                     </Button>

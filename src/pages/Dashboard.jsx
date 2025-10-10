@@ -15,6 +15,8 @@ import AIInsights from "../components/dashboard/AIInsights";
 import UpcomingEvents from "../components/dashboard/UpcomingEvents";
 import UpcomingTasks from "../components/dashboard/UpcomingTasks";
 import WeeklySchedulePreview from "../components/dashboard/WeeklySchedulePreview";
+import EventDialog from "@/components/schedule/EventDialog";
+import AIReviewDialog from "@/components/schedule/AIReviewDialog";
 import Joyride from "../components/common/Joyride";
 import FunFactCard from "../components/dashboard/FunFactCard";
 
@@ -27,6 +29,7 @@ const tourSteps = (t) => [
 ];
 
 export default function Dashboard() {
+  // All hooks must be called before any early returns
   const [family, setFamily] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [events, setEvents] = useState([]);
@@ -35,6 +38,10 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [runTour, setRunTour] = useState(false);
+  const [editEvent, setEditEvent] = useState(null);
+  const [reviewData, setReviewData] = useState(null);
+  const [isReviewDialogOpen, setIsReviewDialogOpen] = useState(false);
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState(null);
   const navigate = useNavigate();
   const { t } = useLanguage();
   const { toast } = useToast();
@@ -108,7 +115,7 @@ export default function Dashboard() {
         console.error("Family not found:", familyError);
         if (familyError.response?.status === 429) {
           setHasError(true);
-          toast({ 
+          toast({ duration: 5000, 
             title: 'Rate Limit Exceeded', 
             description: 'Too many requests. Please wait a moment and refresh.', 
             variant: "destructive" , 
@@ -145,7 +152,7 @@ export default function Dashboard() {
          navigate(createPageUrl("Index"));
       } else if (error.response?.status === 429) {
         setHasError(true);
-        toast({ 
+  toast({ duration: 5000, 
           title: 'Rate Limit Exceeded', 
           description: 'Too many requests. Please wait a moment and refresh.', 
           variant: "destructive" , 
@@ -153,7 +160,7 @@ export default function Dashboard() {
         });
       } else {
         setHasError(true);
-        toast({ title: t('errorLoadingData'), description: t('couldNotLoadDashboard'), variant: "destructive", duration: 5000  });
+  toast({ title: t('errorLoadingData'), description: t('couldNotLoadDashboard'), variant: "destructive", duration: 5000  });
       }
     }
     setIsLoading(false);
@@ -268,29 +275,83 @@ export default function Dashboard() {
     );
   }
 
+  // --- Schedule-like event dialog logic ---
+  const handleDayClick = (dateObj) => {
+    setEditEvent(null);
+    setSelectedTimeSlot({ date: dateObj, hour: 9 });
+  };
+  const handleEventClick = (event) => {
+    setEditEvent(event);
+    setSelectedTimeSlot(null);
+  };
+  const handleDialogClose = () => {
+    setEditEvent(null);
+    setSelectedTimeSlot(null);
+  };
+  const handleProcessSave = async (eventData, _ignored, editType = "single") => {
+    // No AI review for now, just save directly
+    try {
+      if (editEvent && editEvent.id) {
+        await ScheduleEvent.update(editEvent.id, eventData);
+        setEvents(prev => prev.map(e => e.id === editEvent.id ? { ...e, ...eventData } : e));
+  toast({ title: t('eventUpdated'), description: eventData.title, variant: 'success', duration: 5000 });
+      } else {
+        // Ensure family_id is included for new events
+        const newEvent = { ...eventData, family_id: user?.family_id };
+        const created = await ScheduleEvent.create(newEvent);
+        setEvents(prev => [...prev, created]);
+  toast({ title: t('eventCreated'), description: eventData.title, variant: 'success', duration: 5000 });
+      }
+      handleDialogClose();
+    } catch (error) {
+  toast({ title: t('errorSavingEvent'), description: eventData.title, variant: 'destructive', duration: 5000 });
+    }
+  };
+  const handleDialogDelete = async (event) => {
+    if (!window.confirm(t('confirmDeleteEvent') || 'Delete this event?')) return;
+    try {
+      await ScheduleEvent.delete(event.id);
+      setEvents(prev => prev.filter(e => e.id !== event.id));
+  toast({ title: t('eventDeleted'), description: event.title, variant: 'success', duration: 5000 });
+      handleDialogClose();
+    } catch (error) {
+  toast({ title: t('errorDeletingEvent'), description: event.title, variant: 'destructive', duration: 5000 });
+    }
+  };
+
   return (
     <div className="p-4 sm:p-6 space-y-6 max-w-7xl mx-auto">
       <Joyride steps={tourSteps(t)} run={runTour} onComplete={handleTourComplete} />
-      
+      <EventDialog
+        isOpen={!!editEvent || !!selectedTimeSlot}
+        onClose={handleDialogClose}
+        onSave={handleProcessSave}
+        onDelete={handleDialogDelete}
+        familyMembers={familyMembers}
+        initialData={editEvent}
+        selectedDate={selectedTimeSlot?.date}
+        selectedHour={selectedTimeSlot?.hour}
+      />
       <div className="grid lg:grid-cols-4 gap-6">
         <motion.div id="weekly-schedule-preview" className="lg:col-span-2" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}>
-          <WeeklySchedulePreview events={events} familyMembers={familyMembers} />
+          <WeeklySchedulePreview
+            events={events}
+            familyMembers={familyMembers}
+            onDayClick={handleDayClick}
+            onEventClick={handleEventClick}
+          />
         </motion.div>
-        
         <motion.div id="upcoming-events-card" className="lg:col-span-1" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.5, delay: 0.2 }}>
           <UpcomingEvents events={upcomingEvents} familyMembers={familyMembers} />
         </motion.div>
-        
         <motion.div id="upcoming-tasks-card" className="lg:col-span-1" initial={{ opacity: 0, x: 0 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.5, delay: 0.3 }}>
           <UpcomingTasks tasks={upcomingTasks} familyMembers={familyMembers} />
         </motion.div>
       </div>
-
       <div className="grid lg:grid-cols-2 gap-6">
         <motion.div id="ai-insights-card" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.5, delay: 0.4 }}>
           <AIInsights tasks={tasks} events={events} familyMembers={familyMembers} />
         </motion.div>
-        
         <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.5, delay: 0.5 }}>
           <FunFactCard />
         </motion.div>

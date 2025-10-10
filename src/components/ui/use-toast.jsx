@@ -2,7 +2,7 @@
 import { useState, useEffect, createContext, useContext } from "react";
 
 const TOAST_LIMIT = 20;
-const TOAST_REMOVE_DELAY = 1000000;
+const TOAST_REMOVE_DELAY = 5000;
 
 const actionTypes = {
   ADD_TOAST: "ADD_TOAST",
@@ -20,18 +20,25 @@ function genId() {
 
 const toastTimeouts = new Map();
 
+
 const addToRemoveQueue = (toastId) => {
   if (toastTimeouts.has(toastId)) {
     return;
   }
 
+  // Find the toast to get its custom duration
+  const toast = memoryState.toasts.find(t => t.id === toastId);
+  const duration = toast && typeof toast.duration === 'number' ? toast.duration : TOAST_REMOVE_DELAY;
+
+  console.log('[TOAST DEBUG] Scheduling auto-dismiss for toastId:', toastId, 'duration:', duration);
   const timeout = setTimeout(() => {
     toastTimeouts.delete(toastId);
+    console.log('[TOAST DEBUG] Auto-dismiss triggered for toastId:', toastId);
     dispatch({
       type: actionTypes.REMOVE_TOAST,
       toastId,
     });
-  }, TOAST_REMOVE_DELAY);
+  }, duration);
 
   toastTimeouts.set(toastId, timeout);
 };
@@ -46,11 +53,17 @@ const clearFromRemoveQueue = (toastId) => {
 
 export const reducer = (state, action) => {
   switch (action.type) {
-    case actionTypes.ADD_TOAST:
+    case actionTypes.ADD_TOAST: {
+      // Schedule auto-dismiss for this toast if duration is set
+      if (action.toast && (typeof action.toast.duration === 'number' || typeof TOAST_REMOVE_DELAY === 'number')) {
+        console.log('[TOAST DEBUG] ADD_TOAST scheduling auto-dismiss for', action.toast.id, 'duration:', action.toast.duration);
+        addToRemoveQueue(action.toast.id);
+      }
       return {
         ...state,
         toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMIT),
       };
+    }
 
     case actionTypes.UPDATE_TOAST:
       return {

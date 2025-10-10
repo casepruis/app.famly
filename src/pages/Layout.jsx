@@ -1,24 +1,54 @@
-
-
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { SidebarProvider, Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger } from "@/components/ui/sidebar";
-import { Home, Calendar, CheckSquare, Users, Settings, LogOut, User as UserIcon, HardDrive, Plus, Rocket, Gift, ChevronDown, ChevronLeft, ChevronRight, MessageSquare, Zap, Bot, List } from "lucide-react";
+import {
+  SidebarProvider,
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarTrigger
+} from "@/components/ui/sidebar";
+import {
+  Home,
+  Calendar,
+  CheckSquare,
+  Users,
+  Settings,
+  LogOut,
+  User as UserIcon,
+  HardDrive,
+  Plus,
+  Rocket,
+  Gift,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  MessageSquare,
+  Zap,
+  Bot,
+  List,
+  Bell
+} from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { LanguageProvider, useLanguage } from "@/components/common/LanguageProvider";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
 import { getLanguageInfo } from "@/components/common/translations";
-import { User, FamilyMember, Family, Conversation, ChatMessage } from "@/api/entities"; // Added ChatMessage
+import { User, FamilyMember, Family, Conversation, ChatMessage, Push } from "@/api/entities";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/use-toast";
 
-
-
-// Hardcoded list of platform administrators
 import logo from '@/assets/famly_kama_icon.svg';
-
 
 function LanguageSelector() {
   const { currentLanguage, updateUserLanguage } = useLanguage();
@@ -44,7 +74,6 @@ function LanguageSelector() {
     </Select>
   );
 }
-
 
 function UserAvatar({ user, family }) {
   const { t } = useLanguage();
@@ -93,7 +122,6 @@ function UserAvatar({ user, family }) {
   );
 }
 
-
 function LayoutContent({ children, currentPageName }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -102,116 +130,215 @@ function LayoutContent({ children, currentPageName }) {
   
   const [currentUser, setCurrentUser] = useState(null);
   const [family, setFamily] = useState(null);
-  // Add state for the current user's FamilyMember object
   const [currentFamilyMember, setCurrentFamilyMember] = useState(null);
   const [conversations, setConversations] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isChatExpanded, setIsChatExpanded] = useState(true);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [notificationCounts, setNotificationCounts] = useState({});
-  const lastMessageIdsRef = useRef({}); // Ref to track last message IDs for all convos
-  // const pollingIntervalRef = useRef(null); // Ref to hold the interval ID
+  const lastMessageIdsRef = useRef({});
 
   // WS infra
   const wsRef = useRef(null);
   const pingRef = useRef(null);
   const retryRef = useRef(0);
 
-  // Keep volatile values in refs so the WS effect doesn't re-run on every render
-  const conversationsRef = useRef([]);           // instead of useRef(conversations)
-  const meRef = useRef(null);                    // instead of useRef(currentFamilyMember)
-  const notifyRef = useRef(null);                // must be null to avoid TDZ
+  // Volatile refs for WS effect
+  const conversationsRef = useRef([]);
+  const meRef = useRef(null);
+  const notifyRef = useRef(null);
+
+  // ensure we have a push subscription saved on the backend when permission is already granted
+  const ensurePushSubscription = useCallback(async (userId) => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    const reg = await navigator.serviceWorker.ready;
+
+    // do we already have a browser subscription?
+    let sub = await reg.pushManager.getSubscription();
+
+    // get VAPID key from backend
+    const { publicKey } = await Push.getVapidPublicKey();
+
+    // create a new subscription if missing (no prompt; permission is already granted)
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+    }
+
+    // upsert on backend
+    await Push.subscribe({
+      user_id: userId,
+      subscription: sub.toJSON(),
+    });
+
+    console.log('✅ Push subscription synced');
+  }, []);
+
+
+  // --- Web Push helpers ---
+  function urlBase64ToUint8Array(base64String) {
+    const pad = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + pad).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = atob(base64);
+    return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+  }
+
+  const [pushSupported, setPushSupported] = useState(false);
+  const [notifPermission, setNotifPermission] = useState(
+    typeof Notification !== "undefined" ? Notification.permission : "default"
+  );
+
+  useEffect(() => {
+    const supported = ('serviceWorker' in navigator) && ('PushManager' in window);
+    setPushSupported(supported);
+  }, []);
+
+  const enablePush = useCallback(async (userId) => {
+    try {
+      if (!pushSupported) {
+        alert('Push not supported on this browser.');
+        return;
+      }
+      // permission must be from a user gesture (this click)
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        setNotifPermission(perm);
+        alert('Notifications are blocked.');
+        return;
+      }
+
+      // get public key from backend
+      const { publicKey } = await Push.getVapidPublicKey();
+
+      // subscribe via the service worker
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey),
+      });
+
+      // send to backend
+      await Push.subscribe({
+        user_id: userId,
+        subscription: sub.toJSON(),
+      });
+
+      setNotifPermission('granted');
+  toast({ title: 'Notifications enabled', description: 'You will receive alerts for new messages.', duration: 5000 });
+    } catch (err) {
+      console.error('Enable push failed:', err);
+  toast({ title: 'Could not enable notifications', description: String(err?.message || err), variant: 'destructive', duration: 5000 });
+    }
+  }, [pushSupported, toast]);
 
   // Function to handle showing notifications
   const showNotification = useCallback((conversationId, conversationName, senderName, messageContent) => {
-  const urlParams = new URLSearchParams(window.location.search);
-  const activeChatId = urlParams.get('id');
-  const currentPath = window.location.pathname.split('/').pop();
+    const urlParams = new URLSearchParams(window.location.search);
+    const activeChatId = urlParams.get('id');
+    const currentPath = window.location.pathname.split('/').pop();
 
-  // Suppress if user is already viewing this chat
-  if (currentPath === 'Chat' && activeChatId === conversationId) {
-    console.log(`🚫 Notification for ${conversationName} suppressed: user is viewing this chat.`);
-    return;
-  }
-
-  console.log(`✅ Displaying notification for a message in ${conversationName}.`);
-
-  // Update UI badge count immediately
-  setNotificationCounts(prev => ({
-    ...prev,
-    [conversationId]: (prev[conversationId] || 0) + 1,
-  }));
-
-  // Browser notification (auto-close after 5s)
-  let notification;
-  if ('Notification' in window && Notification.permission === 'granted') {
-    notification = new Notification(`${senderName} in ${conversationName}`, {
-      body: messageContent.substring(0, 100),
-      icon: 'https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/52181febd_Screenshot_20250703_092323_Chrome.jpg',
-      tag: conversationId,
-    });
-    notification.onclick = () => {
-      navigate(createPageUrl('Chat') + `?id=${conversationId}`);
-      window.focus();
-    };
-    // 🔔 auto-close
-    setTimeout(() => {
-      try { notification?.close?.(); } catch {}
-    }, 5000);
-  }
-
-  // In-app toast (already auto-dismisses via duration)
-  // toast({
-  //   title: `${senderName} in ${conversationName}`,
-  //   description: messageContent.substring(0, 50) + (messageContent.length > 50 ? '...' : ''),
-  //   duration: 5000,
-  // });
-
-  // 🔵 Auto-clear sidebar badge after 5s unless user opened the chat
-  setTimeout(() => {
-    const nowParams = new URLSearchParams(window.location.search);
-    const nowActive = nowParams.get('id');
-    const nowPath = window.location.pathname.split('/').pop();
-
-    // If the chat was opened meanwhile, don't force-clear (it will clear via famly-chat-read)
-    if (!(nowPath === 'Chat' && nowActive === conversationId)) {
-      setNotificationCounts(prev => ({
-        ...prev,
-        [conversationId]: 0
-      }));
+    // Suppress if user is already viewing this chat
+    if (currentPath === 'Chat' && activeChatId === conversationId) {
+      console.log(`🚫 Notification for ${conversationName} suppressed: user is viewing this chat.`);
+      return;
     }
-  }, 5000);
-}, [navigate, toast]);
-  // Added navigate and toast to dependencies for useCallback
-useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
-useEffect(() => { meRef.current = currentFamilyMember; }, [currentFamilyMember]);
-useEffect(() => { notifyRef.current = showNotification; }, [showNotification]);
 
+    console.log(`✅ Displaying notification for a message in ${conversationName}.`);
+
+    // Update UI badge count immediately
+    setNotificationCounts(prev => ({
+      ...prev,
+      [conversationId]: (prev[conversationId] || 0) + 1,
+    }));
+
+    // Prefer SW registration for foreground notifications when available
+    (async () => {
+      try {
+        if ('Notification' in window && Notification.permission === 'granted') {
+          const reg = await navigator.serviceWorker?.ready;
+          if (reg?.showNotification) {
+            await reg.showNotification(`${senderName} in ${conversationName}`, {
+              body: messageContent.substring(0, 100),
+              icon: '/icons/icon-192.png',
+              badge: '/icons/badge-72.png',
+              tag: conversationId,
+              data: { url: createPageUrl('Chat') + `?id=${conversationId}` },
+            });
+          } else {
+            const n = new Notification(`${senderName} in ${conversationName}`, {
+              body: messageContent.substring(0, 100),
+              icon: '/icons/icon-192.png',
+              tag: conversationId,
+            });
+            setTimeout(() => { try { n?.close?.(); } catch {} }, 5000);
+          }
+        }
+      } catch (e) {
+        console.warn('Notification display error', e);
+      }
+    })();
+
+    // Auto-clear sidebar badge after 5s unless user opened the chat
+    setTimeout(() => {
+      const nowParams = new URLSearchParams(window.location.search);
+      const nowActive = nowParams.get('id');
+      const nowPath = window.location.pathname.split('/').pop();
+      if (!(nowPath === 'Chat' && nowActive === conversationId)) {
+        setNotificationCounts(prev => ({
+          ...prev,
+          [conversationId]: 0
+        }));
+      }
+    }, 5000);
+  }, [navigate, toast]);
   useEffect(() => {
-    // Request notification permission on app load
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
+    if (!currentUser?.id) return;
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission !== 'granted') return;
+    // fire-and-forget; no UI prompt needed
+    ensurePushSubscription(currentUser.id);
+    // run once per user session
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
+
+  // register SW
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(console.error);
     }
   }, []);
 
-  // This useEffect handles clearing notification counts when a chat is opened
+  useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
+  useEffect(() => { meRef.current = currentFamilyMember; }, [currentFamilyMember]);
+  useEffect(() => { notifyRef.current = showNotification; }, [showNotification]);
+
+  // ask permission only if default (initial load)
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      // Don’t auto-prompt here if you prefer; keeping your original behavior:
+      Notification.requestPermission().then(p => setNotifPermission(p));
+    }
+  }, []);
+
+  // Clear notification counts when a chat is opened
   useEffect(() => {
     const urlParams = new URLSearchParams(location.search);
     const activeChatId = urlParams.get('id');
     const currentPath = location.pathname.split('/').pop();
-    
     if (currentPath === 'Chat' && activeChatId) {
-        setNotificationCounts(prev => ({...prev, [activeChatId]: 0}));
+      setNotificationCounts(prev => ({ ...prev, [activeChatId]: 0 }));
     }
   }, [location.pathname, location.search]);
 
-  // Main data loading effect
+  // Main data loading
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const authUser = await User.me();           
+      const authUser = await User.me();
       setCurrentUser(authUser);
-
 
       if (authUser?.family_id) {
         const [familyData, convosData] = await Promise.all([
@@ -222,23 +349,21 @@ useEffect(() => { notifyRef.current = showNotification; }, [showNotification]);
         setFamily(familyData);
         setConversations(convosData);
 
-        // New: call /family-members/me → returns FamilyMember
         const meAsMember = await FamilyMember.me();
         setCurrentFamilyMember(meAsMember || null);
 
-        // Initialize last message IDs for polling
         if (convosData.length > 0) {
-            const latestMessages = await Promise.all(
-                convosData.map(c => ChatMessage.filter({ conversation_id: c.id }, '-created_date', 1))
-            );
-            const initialIds = {};
-            latestMessages.forEach((msgArray, index) => {
-                if (msgArray && msgArray.length > 0) {
-                    initialIds[convosData[index].id] = msgArray[0].id;
-                }
-            });
-            lastMessageIdsRef.current = initialIds;
-            console.log("📊 Initial last message IDs set:", lastMessageIdsRef.current);
+          const latestMessages = await Promise.all(
+            convosData.map(c => ChatMessage.filter({ conversation_id: c.id }, '-created_date', 1))
+          );
+          const initialIds = {};
+          latestMessages.forEach((msgArray, index) => {
+            if (msgArray && msgArray.length > 0) {
+              initialIds[convosData[index].id] = msgArray[0].id;
+            }
+          });
+          lastMessageIdsRef.current = initialIds;
+          console.log("📊 Initial last message IDs set:", lastMessageIdsRef.current);
         }
       }
     } catch (error) {
@@ -248,89 +373,7 @@ useEffect(() => { notifyRef.current = showNotification; }, [showNotification]);
     }
   }, []);
 
-  // Start polling when component is ready and has conversations
-  // useEffect(() => {
-  //   // Only poll if not loading, user exists, and there are conversations
-  //   if (isLoading || !currentUser || conversations.length === 0) {
-  //     // Clear interval if conditions are not met to prevent unnecessary polling
-  //     if (pollingIntervalRef.current) {
-  //       clearInterval(pollingIntervalRef.current);
-  //       pollingIntervalRef.current = null;
-  //       console.log("🧹 Polling paused due to missing data or loading state.");
-  //     }
-  //     return;
-  //   }
-
-  //   const poll = async () => {
-  //     console.log("🔄 Polling for new messages...");
-      
-  //     try {
-  //       // Fetch members only once and cache them for this polling cycle
-  //       const members = await FamilyMember.filter({ family_id: currentUser.family_id });
-  //       // Find the current user's member record to properly check if they sent the message
-  //       const currentUserMember = members.find(m => m.user_id === currentUser.id);
-
-  //       for (const convo of conversations) {
-  //         try {
-  //           const latestMsgArr = await ChatMessage.filter({ conversation_id: convo.id }, '-created_date', 1);
-  //           if (latestMsgArr && latestMsgArr.length > 0) {
-  //             const latestMsg = latestMsgArr[0];
-  //             const lastKnownId = lastMessageIdsRef.current[convo.id];
-
-  //             if (latestMsg.id !== lastKnownId) {
-  //               console.log(`🆕 New message found in "${convo.name}"! Dispatching event.`);
-                
-  //               // Dispatch a global event that the active ChatWindow can listen to
-  //               window.dispatchEvent(new CustomEvent('famly-new-chat-message', { detail: { message: latestMsg } }));
-                
-  //               // Handle notifications if the message is not from the current user
-  //               if (latestMsg.sender_id !== currentUserMember?.id) { 
-  //                   const sender = members.find(m => m.id === latestMsg.sender_id);
-  //                   showNotification(convo.id, convo.name, sender?.name || 'Someone', latestMsg.content);
-  //               }
-                
-  //               // Update the ref with the new latest ID
-  //               lastMessageIdsRef.current = {
-  //                   ...lastMessageIdsRef.current,
-  //                   [convo.id]: latestMsg.id
-  //               };
-  //             }
-  //           }
-  //         } catch (conversationError) {
-  //           // Skip this conversation if there's an error, continue with others
-  //           console.error(`Error polling conversation ${convo.id}:`, conversationError);
-  //         }
-  //       }
-  //     } catch (error) {
-  //       console.error("Error during polling:", error);
-        
-  //       // If we hit a rate limit, slow down the polling
-  //       if (error.response?.status === 429) {
-  //         console.log("⏰ Rate limit hit, extending polling interval");
-  //         if (pollingIntervalRef.current) {
-  //           clearInterval(pollingIntervalRef.current);
-  //           // Restart with longer interval
-  //           pollingIntervalRef.current = setInterval(poll, 15000); // 15 seconds instead of 7
-  //         }
-  //       }
-  //     }
-  //   };
-
-  //   // Clear any existing interval before setting a new one
-  //   if (pollingIntervalRef.current) {
-  //     clearInterval(pollingIntervalRef.current);
-  //   }
-  //   pollingIntervalRef.current = setInterval(poll, 10000); // Start with 10 seconds instead of 7
-
-  //   // Cleanup function
-  //   return () => {
-  //     if (pollingIntervalRef.current) {
-  //       clearInterval(pollingIntervalRef.current);
-  //       console.log("🧹 Polling stopped.");
-  //     }
-  //   };
-  // }, [isLoading, currentUser, conversations, navigate, toast, showNotification]);
-
+  // WebSocket wiring
   useEffect(() => {
     if (!currentUser || !family || !currentFamilyMember) return;
 
@@ -353,7 +396,6 @@ useEffect(() => { notifyRef.current = showNotification; }, [showNotification]);
         console.log("📡 Layout WebSocket connected");
         retryRef.current = 0;
 
-        // keepalive ping every 30s
         if (pingRef.current) clearInterval(pingRef.current);
         pingRef.current = window.setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) ws.send("ping");
@@ -361,7 +403,7 @@ useEffect(() => { notifyRef.current = showNotification; }, [showNotification]);
       };
 
       ws.onmessage = async (event) => {
-        if (typeof event.data !== "string" || event.data[0] !== "{") return; // ignore "pong"/non-JSON
+        if (typeof event.data !== "string" || event.data[0] !== "{") return;
 
         try {
           const { type, payload } = JSON.parse(event.data);
@@ -369,7 +411,6 @@ useEffect(() => { notifyRef.current = showNotification; }, [showNotification]);
           if (type === "chat_message_created") {
             const message = payload;
 
-            // suppress self-notifications
             if (message.sender_id === meRef.current?.id) return;
 
             const convo = conversationsRef.current.find(c => c.id === message.conversation_id);
@@ -402,8 +443,6 @@ useEffect(() => { notifyRef.current = showNotification; }, [showNotification]);
         if (closed) return;
 
         console.warn("Layout WebSocket closed:", e.code, e.reason || "(no reason)");
-
-        // exponential backoff up to 30s
         const delay = Math.min(30000, 1000 * Math.pow(2, retryRef.current++));
         setTimeout(connect, delay);
       };
@@ -417,7 +456,6 @@ useEffect(() => { notifyRef.current = showNotification; }, [showNotification]);
       try { wsRef.current?.close(); } catch {}
       wsRef.current = null;
     };
-  // Keep deps minimal so we don't create duplicate connections on every render.
   }, [currentUser, family, currentFamilyMember]);
 
   useEffect(() => {
@@ -428,18 +466,17 @@ useEffect(() => { notifyRef.current = showNotification; }, [showNotification]);
   }, [loadData, location.pathname]);
 
   useEffect(() => {
-      const handleChatRead = (event) => {
-          const { conversationId } = event.detail;
-          setNotificationCounts(prev => ({
-              ...prev,
-              [conversationId]: 0
-          }));
-      };
+    const handleChatRead = (event) => {
+      const { conversationId } = event.detail;
+      setNotificationCounts(prev => ({
+        ...prev,
+        [conversationId]: 0
+      }));
+    };
 
-      window.addEventListener('famly-chat-read', handleChatRead);
-      return () => window.removeEventListener('famly-chat-read', handleChatRead);
+    window.addEventListener('famly-chat-read', handleChatRead);
+    return () => window.removeEventListener('famly-chat-read', handleChatRead);
   }, []);
-
 
   const staticNavItems = useMemo(() => [
     { title: t('dashboard') || 'Dashboard', url: createPageUrl("Dashboard"), icon: Home, id: 'sidebar-dashboard' },
@@ -485,16 +522,6 @@ useEffect(() => { notifyRef.current = showNotification; }, [showNotification]);
     );
   }
 
-  // Special layout for the Chat page to be full-screen
-  // if (currentPageName === 'Chat') {
-  //   return (
-  //     <div className="h-screen w-screen flex bg-white">
-  //       {children}
-  //     </div>
-  //   );
-  // }
-
-  // Special layout for Debug page to be simple
   if (currentPageName === 'Debug') {
     return (
       <div className="bg-gray-100">
@@ -503,12 +530,12 @@ useEffect(() => { notifyRef.current = showNotification; }, [showNotification]);
     );
   }
 
-  
   console.log("🧪 Header visibility check", {
     currentUser,
     showHeaderActions,
     currentPageName,
   });
+
   return (
     <SidebarProvider>
       <style>
@@ -671,6 +698,20 @@ useEffect(() => { notifyRef.current = showNotification; }, [showNotification]);
               </div>
               
               <div className="flex items-center gap-2">
+                {/* Enable notifications button (shown only when supported and not already granted) */}
+                {currentUser && pushSupported && notifPermission !== 'granted' && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => enablePush(currentUser.id)}
+                    className="text-gray-600 hover:text-gray-900 flex items-center gap-2"
+                    title="Enable notifications"
+                  >
+                    <Bell className="w-4 h-4" />
+                    <span className="text-sm">Enable notifications</span>
+                  </Button>
+                )}
+
                 <Button variant="ghost" size="icon" onClick={() => handleActionClick('tour')} className="text-gray-500 hover:text-gray-700" title={t('tour')}>
                   <Rocket className="w-4 h-4" />
                 </Button>
@@ -701,4 +742,3 @@ export default function Layout({ children, currentPageName }) {
     </LanguageProvider>
   );
 }
-

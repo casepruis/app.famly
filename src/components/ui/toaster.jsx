@@ -20,7 +20,9 @@ export function Toaster() {
     }
   };
 
-  const visibleToasts = toasts.filter(t => !dismissed.has(t.id));
+  // Only show toasts that are open (not dismissed by timer or close button)
+  const visibleToasts = toasts.filter(t => t.open !== false);
+  console.log('[TOASTER DEBUG] Rendering. Toasts:', toasts, 'Visible:', visibleToasts);
 
   return (
     <ToastProvider>

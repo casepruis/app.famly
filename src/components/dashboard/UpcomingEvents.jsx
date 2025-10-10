@@ -1,11 +1,12 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar, ArrowRight, Briefcase, GraduationCap, Heart, Stethoscope, Coffee, Home, Info, Cake } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
+import EventDialog from "@/components/schedule/EventDialog";
 import { useLanguage } from "@/components/common/LanguageProvider";
 
 const getEventAppearance = (event) => {
@@ -30,17 +31,57 @@ const getEventAppearance = (event) => {
 };
 
 export default function UpcomingEvents({ events, familyMembers }) {
+  const [showDialog, setShowDialog] = useState(false);
+  const [dialogData, setDialogData] = useState(null);
   const navigate = useNavigate();
   const { t } = useLanguage();
+
+  const handleAddEvent = () => {
+    // Prefill with today's date for new event, and ensure no id property is present
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const start_time = `${year}-${month}-${day}T09:00:00`;
+    const end_time = `${year}-${month}-${day}T10:00:00`;
+    setDialogData({ start_time, end_time }); // no id property
+    setShowDialog(true);
+  };
+  const handleDialogClose = () => setShowDialog(false);
+  const handleDialogSave = () => setShowDialog(false);
+  const handleDialogDelete = () => setShowDialog(false);
 
   return (
     <Card id="upcoming-events-card" className="h-full">
       <CardContent className="p-4">
-        <div className="flex items-center gap-2 mb-4">
-          <Calendar className="w-4 h-4 text-gray-400" />
-          <span className="text-sm font-medium text-gray-600">{t('upcomingEvents')}</span>
-        </div>
-        <div className="space-y-3">
+        {showDialog && (
+          <EventDialog
+            isOpen={showDialog}
+            onClose={handleDialogClose}
+            onSave={handleDialogSave}
+            onDelete={handleDialogDelete}
+            familyMembers={familyMembers}
+            initialData={dialogData && dialogData.id ? { ...dialogData, id: undefined } : dialogData}
+          />
+        )}
+  <div className="flex items-center justify-between">
+    <div className="flex items-center gap-2">
+      <Calendar className="w-4 h-4 text-gray-400" />
+      <span className="text-sm font-medium text-gray-600">{t('upcomingEvents')}</span>
+    </div>
+
+    <Button
+      variant="outline"
+      size="icon"
+      className="h-6 w-6 p-0 border-blue-200 text-blue-600 hover:bg-blue-50"
+      onClick={handleAddEvent}
+    >
+      +
+    </Button>
+  </div>
+
+  
+  <div className="space-y-3">
           {events.length > 0 ? (
             events.map(event => {
               const { Icon, color } = getEventAppearance(event);
@@ -86,9 +127,12 @@ export default function UpcomingEvents({ events, familyMembers }) {
             <p className="text-sm text-center text-gray-500 py-4">{t('noUpcomingEvents')}</p>
           )}
         </div>
-        <Button variant="ghost" size="sm" className="w-full mt-4 text-blue-600 hover:text-blue-700" onClick={() => navigate(createPageUrl('Schedule'))}>
-          {t('viewFullSchedule')} <ArrowRight className="w-4 h-4 ml-2" />
-        </Button>
+        <div className="flex gap-2 mt-4">
+          <Button variant="ghost" size="sm" className="w-full text-blue-600 hover:text-blue-700" onClick={() => navigate(createPageUrl('Schedule'))}>
+            {t('viewFullSchedule')} <ArrowRight className="w-4 h-4 ml-2" />
+          </Button>
+          
+        </div>
       </CardContent>
     </Card>
   );

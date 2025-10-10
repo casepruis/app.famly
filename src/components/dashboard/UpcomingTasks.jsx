@@ -1,14 +1,17 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CheckSquare, ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
+import TaskForm from "@/components/tasks/TaskForm";
 import { useLanguage } from "@/components/common/LanguageProvider";
 import { format, parseISO } from "date-fns";
 
 export default function UpcomingTasks({ tasks, familyMembers }) {
+  const [showDialog, setShowDialog] = useState(false);
+  const [dialogData, setDialogData] = useState(null);
   const navigate = useNavigate();
   const { t } = useLanguage();
   
@@ -18,13 +21,42 @@ export default function UpcomingTasks({ tasks, familyMembers }) {
     return member?.color || '#6366f1'; // Default member color
   };
 
+  const handleAddTask = () => {
+    setDialogData(null);
+    setShowDialog(true);
+  };
+  const handleDialogClose = () => setShowDialog(false);
+  const handleDialogSave = () => setShowDialog(false);
+
   return (
     <Card id="upcoming-tasks-card" className="h-full">
       <CardContent className="p-4">
-        <div className="flex items-center gap-2 mb-4">
-          <CheckSquare className="w-4 h-4 text-gray-400" />
-          <span className="text-sm font-medium text-gray-600">{t('upcomingTasks')}</span>
+        {showDialog && (
+          <TaskForm
+            isOpen={showDialog}
+            onClose={handleDialogClose}
+            onSave={handleDialogSave}
+            familyMembers={familyMembers}
+            task={dialogData}
+          />
+        )}
+
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckSquare className="w-4 h-4 text-gray-400" />
+            <span className="text-sm font-medium text-gray-600">{t('upcomingTasks')}</span>
+          </div>
+
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-6 w-6 p-0 border-blue-200 text-blue-600 hover:bg-blue-50"
+            onClick={handleAddTask}
+          >
+            +
+          </Button>
         </div>
+
         <div className="space-y-3">
           {tasks.length > 0 ? (
             tasks.map(task => (
@@ -42,9 +74,12 @@ export default function UpcomingTasks({ tasks, familyMembers }) {
             <p className="text-sm text-center text-gray-500 py-4">{t('noUpcomingTasks')}</p>
           )}
         </div>
-        <Button variant="ghost" size="sm" className="w-full mt-4 text-blue-600 hover:text-blue-700" onClick={() => navigate(createPageUrl('Tasks'))}>
-          {t('viewAllTasks')} <ArrowRight className="w-4 h-4 ml-2" />
-        </Button>
+        <div className="flex gap-2 mt-4">
+          <Button variant="ghost" size="sm" className="w-full text-blue-600 hover:text-blue-700" onClick={() => navigate(createPageUrl('Tasks'))}>
+            {t('viewAllTasks')} <ArrowRight className="w-4 h-4 ml-2" />
+          </Button>
+
+        </div>
       </CardContent>
     </Card>
   );

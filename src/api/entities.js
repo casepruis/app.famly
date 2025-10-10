@@ -30,32 +30,96 @@ const buildQueryParams = (params = {}, orderBy = null, limit = null) => {
   return q.toString();
 };
 
-const fetchWithAuth = async (url, options = {}) => {
-  const token = authClient.getToken?.();
-  const headers = {
-    ...(options.headers || {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    "Content-Type": "application/json",
+// api/http.ts (or wherever fetchWithAuth lives)
+// --- helpers ---
+export async function fetchWithAuth(path, options = {}) {
+  const base =
+    (import.meta && import.meta.env && (import.meta.env.VITE_API_BASE || "") || "").replace(/\/+$/, "") ||
+    "/api";
+  const url = path.startsWith("http") ? path : `${base}${path}`;
+
+  const token = localStorage.getItem("famlyai_token") || "";
+  const headers = new Headers(options.headers || {});
+
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  // If a body is present and no explicit content-type, default to JSON
+  const hasBody = options.body !== undefined && options.body !== null;
+  if (hasBody && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const req = {
+    credentials: "same-origin",
+    ...options,
+    headers,
   };
 
-  const res = await fetch(`${API_BASE}${url}`, { ...options, headers });
+  const res = await fetch(url, req);
+
+  // 204/205: no content
+  if (res.status === 204 || res.status === 205) return null;
+
+  const contentType = res.headers.get("content-type") || "";
+  const isJson = contentType.includes("application/json");
+
+  // Read the body exactly once on the main Response
+  let data;
+  try {
+    data = isJson ? await res.json() : await res.text();
+  } catch (e) {
+    data = undefined;
+  }
 
   if (!res.ok) {
-    let detail;
+    // Try to surface a useful message
+    let errText = "";
     try {
-      detail = await res.json();
-    } catch {
-      detail = await res.text();
-    }
-    const err = new Error(`API error: ${res.status}`);
-    err.status = res.status;
-    err.detail = detail;
-    console.error("API error response:", detail);
+      const clone = res.clone();
+      errText = await clone.text();
+    } catch (_) {}
+    const msg =
+      (typeof data === "string" && data) ||
+      errText ||
+      `${res.status} ${res.statusText}`;
+    const err = new Error(msg);
+    err.status = res.status; // handy upstream
     throw err;
   }
-  const ct = res.headers.get("content-type") || "";
-  return ct.includes("application/json") ? res.json() : res.text();
-};
+
+  return data;
+}
+
+
+
+// const fetchWithAuth = async (url, options = {}) => {
+//   const token = authClient.getToken?.();
+//   const headers = {
+//     ...(options.headers || {}),
+//     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+//     "Content-Type": "application/json",
+//   };
+
+//   const res = await fetch(`${API_BASE}${url}`, { ...options, headers });
+
+//   if (!res.ok) {
+//     let detail;
+//     try {
+//       detail = await res.json();
+//     } catch {
+//       detail = await res.text();
+//     }
+//     const err = new Error(`API error: ${res.status}`);
+//     err.status = res.status;
+//     err.detail = detail;
+//     console.error("API error response:", detail);
+//     throw err;
+//   }
+//   const ct = res.headers.get("content-type") || "";
+//   return ct.includes("application/json") ? res.json() : res.text();
+// };
 
 // ---------- Users ----------
 export const User = {
@@ -310,9 +374,7 @@ export const Conversation = {
 export const ChatMessage = {
   filter: (params = {}, orderBy = null, limit = null) => {
     const query = buildQueryParams(params, orderBy, limit);
-    return fetchWithAuth(
-      ensureTrailingSlash(`/chat_messages${query ? `?${query}` : ""}`)
-    );
+    return fetchWithAuth(`/chat_messages${query ? `?${query}` : ""}`);
   },
   get: (id) => fetchWithAuth(`/chat_messages/${id}`),
   create: (data) =>
@@ -324,6 +386,10 @@ export const ChatMessage = {
     fetchWithAuth(`/chat_messages/${id}`, {
       method: "DELETE",
     }),
+  emptyConversation: (id) =>
+    fetchWithAuth(`/chat_messages/conversation/${id}`, {
+      method: "DELETE",
+    }),  
 };
 
 // ---------- Wishlist Items ----------
@@ -397,4 +463,13 @@ export const FamilyInvitation = {
     const qs = params ? `?${new URLSearchParams(params).toString()}` : '';
     return fetchWithAuth(`/family_invitations/${qs}`);
   },
+};
+
+export const Push = {
+  getVapidPublicKey: () => fetchWithAuth('/push/vapid-public-key'),
+  subscribe: (payload) =>
+    fetchWithAuth('/push/subscribe', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 };

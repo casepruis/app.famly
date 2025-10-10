@@ -32,7 +32,7 @@ export default function MessageProcessor() {
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
-    toast({
+  toast({ duration: 5000,
       title: "Copied to clipboard",
       description: "Webhook URL has been copied to your clipboard.", 
       duration: 5000 
@@ -88,13 +88,13 @@ export default function MessageProcessor() {
       setRecentMessages(prev => [newMessage, ...prev.slice(0, 4)]);
       setTestMessage("");
       
-      toast({
+  toast({ duration: 5000,
         title: "Message Processed",
         description: "Your test message has been processed successfully."
       });
     } catch (error) {
       console.error('Message processing error:', error);
-      toast({
+  toast({ duration: 5000,
         title: "Processing Failed",
         description: "There was an error processing your message.",
         variant: "destructive",

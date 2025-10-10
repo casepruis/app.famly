@@ -63,7 +63,7 @@ export default function ChatPage() {
     }, [activeConversationId, navigate, toast]);
     
     const handleComingSoon = (feature) => {
-        toast({
+    toast({ duration: 5000,
             title: `${feature} ${t('comingSoon') || 'Coming Soon'}`,
             description: t('featureInDevelopment') || 'This feature is currently in development.',
             duration: 5000 
@@ -79,7 +79,7 @@ export default function ChatPage() {
 
         if (isConfirmed) {
             try {
-                await ChatMessage.delete(activeConversationId);
+                await ChatMessage.emptyConversation(activeConversationId);
                 // const messagesToDelete = await ChatMessage.filter({ conversation_id: activeConversationId });
                 // // Filter only messages from the current user (security/privacy consideration, adjust if needed)
                 // // For a full chat clear, simply delete all messages associated with the conversation_id
@@ -91,7 +91,7 @@ export default function ChatPage() {
                 // for (const message of allConversationMessages) {
                 //     await ChatMessage.delete(message.id);
                 // }
-                toast({ title: t('chatCleared') || 'Chat Cleared', description: t('allMessagesDeleted') || 'All messages have been deleted.' });
+                toast({ title: t('chatCleared') || 'Chat Cleared', description: t('allMessagesDeleted') || 'All messages have been deleted.', duration: 5000 });
                 setChatVersion(v => v + 1); // Force re-render of ChatWindow
             } catch (error) {
                 console.error("Failed to clear chat:", error);

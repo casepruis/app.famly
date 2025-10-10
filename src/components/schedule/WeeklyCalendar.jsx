@@ -11,7 +11,8 @@ import { useLanguage } from "@/components/common/LanguageProvider";
 
 const locales = { nl, es, fr, de, it, pt, en: undefined };
 
-const EventCard = ({ event, onEventClick, familyMembers }) => {
+// Accepts onEdit and onDelete for swipe actions
+const EventCard = ({ event, onEventClick, familyMembers, onEdit, onDelete }) => {
     const { t } = useLanguage();
     
     const getAssigneeColor = (ids) => {
@@ -62,7 +63,7 @@ const EventCard = ({ event, onEventClick, familyMembers }) => {
     );
 };
 
-export default function WeeklyCalendar({ events, familyMembers, onEventClick, onTimeSlotClick, initialDate }) {
+export default function WeeklyCalendar({ events, familyMembers, onEventClick, onTimeSlotClick, initialDate, onEditEvent, onDeleteEvent }) {
   const [currentWeek, setCurrentWeek] = useState(startOfWeek(initialDate || new Date(), { weekStartsOn: 1 }));
   const [isPickerOpen, setIsPickerOpen] = useState(false);
   const { t, currentLanguage } = useLanguage();
@@ -232,6 +233,8 @@ export default function WeeklyCalendar({ events, familyMembers, onEventClick, on
                             event={event} 
                             onEventClick={onEventClick} 
                             familyMembers={familyMembers}
+                            onEdit={onEditEvent}
+                            onDelete={onDeleteEvent}
                         />
                       ))}
                     </div>

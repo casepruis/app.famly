@@ -38,7 +38,7 @@ const EventCard = ({ event, familyMembers }) => {
     );
 };
 
-export default function WeeklySchedulePreview({ events, familyMembers }) {
+export default function WeeklySchedulePreview({ events, familyMembers, onDayClick, onEventClick }) {
     const [currentWeek, setCurrentWeek] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
     const [calendarView, setCalendarView] = useState('weekly');
     const [useDashboardFavorite, setUseDashboardFavorite] = useState(false);
@@ -123,11 +123,27 @@ export default function WeeklySchedulePreview({ events, familyMembers }) {
                             {weekDays.map(day => {
                                 const dayKey = format(day, 'yyyy-MM-dd');
                                 const dayEvents = eventsByDay[dayKey] || [];
-                                console.log("Day Events", dayKey, dayEvents.map(e => e.id));
                                 return (
-                                    <div key={dayKey} className="border-r border-gray-200 last:border-r-0 p-1 overflow-hidden">
+                                    <div
+                                        key={dayKey}
+                                        className="border-r border-gray-200 last:border-r-0 p-1 overflow-hidden cursor-pointer group"
+                                        onClick={e => {
+                                            // Only trigger add if clicking empty space (not on event)
+                                            if (onDayClick && e.target === e.currentTarget) {
+                                                onDayClick(day);
+                                            }
+                                        }}
+                                    >
                                         {dayEvents.map((event, idx) => (
-                                            <EventCard key={event.id || `${dayKey}-${idx}`} event={event} familyMembers={familyMembers} />
+                                            <div
+                                                key={event.id || `${dayKey}-${idx}`}
+                                                onClick={ev => {
+                                                    ev.stopPropagation();
+                                                    if (onEventClick) onEventClick(event);
+                                                }}
+                                            >
+                                                <EventCard event={event} familyMembers={familyMembers} />
+                                            </div>
                                         ))}
                                     </div>
                                 );
