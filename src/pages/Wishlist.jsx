@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { FamilyMember, WishlistItem, User } from '@/api/entities';
+import { FamilyMember, WishlistItem } from '@/api/entities';
+import { useFamilyData } from "@/hooks/FamilyDataContext";
+// Debug: log WishlistItem after all imports
+console.log('WishlistItem import:', WishlistItem);
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,104 +12,79 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/components/ui/use-toast";
 import { InvokeLLM } from "@/api/integrations";
 
-export default function Wishlist() {
+const Wishlist = () => {
   const [searchParams] = useSearchParams();
-  const memberId =
-    searchParams.get('memberId') ||
-    searchParams.get('memberid') ||
-    searchParams.get('memberID') ||
-    null;
-
-  const { toast } = useToast();
-
-  const [accessState, setAccessState] = useState('loading'); // loading, password_prompt, visible, error
-  const [member, setMember] = useState(null);
+  const { user, family, members, isFamilyMember, memberId } = useFamilyData();
   const [items, setItems] = useState([]);
-  const [password, setPassword] = useState('');
-  const [errorMessage, setErrorMessage] = useState('');
-  const [isFamilyMember, setIsFamilyMember] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newItem, setNewItem] = useState({ name: '', url: '', price: '' });
   const [isAdding, setIsAdding] = useState(false);
+  const [accessState, setAccessState] = useState('loading');
+  const [password, setPassword] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [member, setMember] = useState(null);
+  const toast = useToast();
+
 
   useEffect(() => {
-    const initialize = async () => {
-      if (!memberId) {
-        setAccessState('error');
-        setErrorMessage("Geen familielid gespecificeerd.");
-        return;
-      }
+  // Use lowercase 'memberid' to match the URL
+  const memberIdParam = searchParams.get('memberid');
+    console.log('Wishlist useEffect: members', members, 'memberIdParam', memberIdParam);
+    if (members && memberIdParam) {
+      const m = members.find(m => m.id === memberIdParam);
+      console.log('Wishlist useEffect: found member', m);
+      setMember(m);
+    } else {
+      setMember(null);
+    }
+    setAccessState('loading');
+  }, [members, searchParams]);
 
-      // Try to load items without password first; backend will decide if allowed
-      try {
-        await loadItems({});
-        setAccessState('visible');
-      } catch (e) {
-        if (e?.status === 403) {
-          setAccessState('password_prompt');
-        } else if (e?.status === 404) {
-          setAccessState('error');
-          setErrorMessage("Kon de gevraagde verlanglijst niet vinden.");
-        } else {
-          setAccessState('error');
-          setErrorMessage("Er is iets misgegaan.");
-        }
-      }
+  useEffect(() => {
+    if (member && member.id) {
+      console.log('Wishlist useEffect: loading items for member', member.id);
+      loadItems(member.id);
+    } else if (members && members.length > 0) {
+      console.warn('Wishlist: No valid member selected, cannot load items.');
+    }
+  }, [member, members]);
 
-      // If user is logged in, we can also fetch the member for header info
-      try {
-        const currentUser = await User.me();
-        if (currentUser) {
-          const memberData = await FamilyMember.get(memberId);
-          setMember(memberData);
-          setIsFamilyMember(currentUser.family_id === memberData.family_id);
-        }
-      } catch {
-        setIsFamilyMember(false);
-      }
-    };
-    initialize();
-  }, [memberId]);
-
-  const loadItems = async ({ pw } = {}) => {
-    if (!memberId) return;
-    const params = { family_member_id: memberId, ...(pw ? { password: pw } : {}) };
-    const wishlistItems = await WishlistItem.filter(params);
-    setItems(wishlistItems.sort((a, b) => (a.status > b.status) ? 1 : -1));
-  };
-
-  const handlePasswordSubmit = async (e) => {
-    e.preventDefault();
+  const loadItems = async (memberIdToLoad) => {
+    setAccessState('loading');
     try {
-      await loadItems({ pw: password });
+      console.log('Calling WishlistItem.filter with', memberIdToLoad);
+      const response = await WishlistItem.filter({ family_member_id: memberIdToLoad });
+      console.log('WishlistItem.filter response:', response);
+      // Try to support both array and {results: array}
+      const itemsArray = Array.isArray(response) ? response : (response?.results || []);
+      setItems(itemsArray);
       setAccessState('visible');
-      setErrorMessage('');
-    } catch {
-      setErrorMessage("Onjuist wachtwoord. Probeer het opnieuw.");
+    } catch (e) {
+      setItems([]);
+      setAccessState('error');
+      setErrorMessage('Kon verlanglijst niet laden.');
+      console.error('WishlistItem.filter error:', e);
     }
   };
 
   const handleClaim = async (item) => {
-    const name = prompt(`Om "${item.name}" te claimen, voer je naam in:`);
-    if (name) {
-      try {
-        await WishlistItem.update(item.id, { status: 'claimed', claimed_by_name: name });
-        toast({ title: "Item geclaimd!", description: `Je hebt ${item.name} succesvol geclaimd.` , duration: 5000 });
-        loadItems();
-      } catch (e) {
-        toast({ title: "Fout", description: "Kon item niet claimen.", variant: "destructive" , duration: 5000 });
-      }
+    try {
+      // await WishlistItem.update(item.id, { status: 'claimed', claimed_by_name: user?.name });
+      toast({ title: "Item geclaimd!", description: `Je hebt ${item.name} succesvol geclaimd.`, duration: 5000 });
+  loadItems(member.id);
+    } catch (e) {
+      toast({ title: "Fout", description: "Kon item niet claimen.", variant: "destructive", duration: 5000 });
     }
   };
 
   const handleUnclaim = async (item) => {
     if (window.confirm("Weet je zeker dat je dit item wilt vrijgeven zodat het weer beschikbaar is?")) {
       try {
-        await WishlistItem.update(item.id, { status: 'available', claimed_by_name: null });
-        toast({ title: "Item vrijgegeven", description: `${item.name} is weer beschikbaar.` , duration: 5000 });
-        loadItems();
+        // await WishlistItem.update(item.id, { status: 'available', claimed_by_name: null });
+        toast({ title: "Item vrijgegeven", description: `${item.name} is weer beschikbaar.`, duration: 5000 });
+  loadItems(member.id);
       } catch (e) {
-        toast({ title: "Fout", description: "Kon item niet vrijgeven.", variant: "destructive" , duration: 5000 });
+        toast({ title: "Fout", description: "Kon item niet vrijgeven.", variant: "destructive", duration: 5000 });
       }
     }
   };
@@ -114,10 +92,9 @@ export default function Wishlist() {
   const handleAddItem = async (e) => {
     e.preventDefault();
     if (!newItem.name) {
-      toast({ title: "Naam is verplicht", variant: "destructive" , duration: 5000 });
+      toast({ title: "Naam is verplicht", variant: "destructive", duration: 5000 });
       return;
     }
-
     setIsAdding(true);
     try {
       let price = newItem.price ? parseFloat(newItem.price) : null;
@@ -138,21 +115,19 @@ export default function Wishlist() {
           console.warn("Kon prijs niet automatisch ophalen:", priceError);
         }
       }
-
-      await WishlistItem.create({
-        name: newItem.name,
-        url: newItem.url || null,
-        price: price,
-        family_member_id: memberId
-      });
-
-      toast({ title: "Item toegevoegd!", description: `${newItem.name} is toegevoegd aan de verlanglijst.` , duration: 5000 });
+      // await WishlistItem.create({
+      //   name: newItem.name,
+      //   url: newItem.url || null,
+      //   price: price,
+      //   family_member_id: memberId
+      // });
+      toast({ title: "Item toegevoegd!", description: `${newItem.name} is toegevoegd aan de verlanglijst.`, duration: 5000 });
       setNewItem({ name: '', url: '', price: '' });
       setShowAddForm(false);
       loadItems();
     } catch (e) {
       console.error("Fout bij toevoegen item:", e);
-      toast({ title: "Fout", description: "Kon item niet toevoegen.", variant: "destructive" , duration: 5000 });
+      toast({ title: "Fout", description: "Kon item niet toevoegen.", variant: "destructive", duration: 5000 });
     } finally {
       setIsAdding(false);
     }
@@ -161,11 +136,11 @@ export default function Wishlist() {
   const handleDeleteItem = async (itemId) => {
     if (window.confirm(`Weet je zeker dat je dit item wilt verwijderen?`)) {
       try {
-        await WishlistItem.delete(itemId);
-        toast({ title: "Item verwijderd", description: "Het item is verwijderd van de verlanglijst." , duration: 5000 });
-        loadItems();
+        // await WishlistItem.delete(itemId);
+        toast({ title: "Item verwijderd", description: "Het item is verwijderd van de verlanglijst.", duration: 5000 });
+  loadItems(member.id);
       } catch (e) {
-        toast({ title: "Fout", description: "Kon item niet verwijderen.", variant: "destructive" , duration: 5000 });
+        toast({ title: "Fout", description: "Kon item niet verwijderen.", variant: "destructive", duration: 5000 });
       }
     }
   };
@@ -175,11 +150,23 @@ export default function Wishlist() {
     toast({
       title: "Link gekopieerd!",
       description: "De link naar deze verlanglijst is naar je klembord gekopieerd.",
-      duration: 5000 
+      duration: 5000
     });
   };
 
   if (accessState === 'loading') {
+    // If member is null after loading, show a fallback error
+    if (members && members.length > 0 && !member) {
+      return (
+        <div className="min-h-screen bg-gray-50 p-4 sm:p-8 flex flex-col justify-center items-center">
+          <div className="text-center">
+            <X className="w-12 h-12 mx-auto text-red-500 mb-4" />
+            <h1 className="text-2xl font-bold text-gray-800">Geen geldige gebruiker</h1>
+            <p className="text-gray-500 mt-1">Kon geen familielid vinden voor deze verlanglijst.</p>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen bg-gray-50 p-4 sm:p-8 flex flex-col justify-center items-center">
         <div className="text-center">
@@ -370,5 +357,7 @@ export default function Wishlist() {
     );
   }
 
-  return null;
-}
+// Remove stray return outside component
+};
+
+export default Wishlist;

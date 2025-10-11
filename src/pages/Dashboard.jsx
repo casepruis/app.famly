@@ -1,9 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Task } from "@/api/entities";
-import { ScheduleEvent } from "@/api/entities";
-import { FamilyMember } from "@/api/entities";
-import { Family } from "@/api/entities";
-import { User } from "@/api/entities";
+import { useFamilyData } from "@/hooks/FamilyDataContext";
 import { motion } from "framer-motion";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { createPageUrl } from "@/utils";
@@ -17,6 +13,7 @@ import UpcomingTasks from "../components/dashboard/UpcomingTasks";
 import WeeklySchedulePreview from "../components/dashboard/WeeklySchedulePreview";
 import EventDialog from "@/components/schedule/EventDialog";
 import AIReviewDialog from "@/components/schedule/AIReviewDialog";
+import { ScheduleEvent } from "@/api/entities";
 import Joyride from "../components/common/Joyride";
 import FunFactCard from "../components/dashboard/FunFactCard";
 
@@ -30,12 +27,7 @@ const tourSteps = (t) => [
 
 export default function Dashboard() {
   // All hooks must be called before any early returns
-  const [family, setFamily] = useState(null);
-  const [tasks, setTasks] = useState([]);
-  const [events, setEvents] = useState([]);
-  const [familyMembers, setFamilyMembers] = useState([]);
-  const [user, setUser] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { user, family, members: familyMembers, events, tasks, isLoading, error, reload } = useFamilyData();
   const [hasError, setHasError] = useState(false);
   const [runTour, setRunTour] = useState(false);
   const [editEvent, setEditEvent] = useState(null);
@@ -52,120 +44,13 @@ export default function Dashboard() {
     for (let i = 0; i < maxRetries; i++) {
       try {
         return await fn();
-      } catch (error) {
-        if (error.response?.status === 429 && i < maxRetries - 1) {
-          const delay = baseDelay * Math.pow(2, i) + Math.random() * 1000;
-          console.log(`Rate limited, retrying in ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-        throw error;
+      } catch (err) {
+        if (i === maxRetries - 1) throw err;
+        await new Promise(res => setTimeout(res, baseDelay * Math.pow(2, i)));
       }
     }
   };
 
-  useEffect(() => {
-    // Debounce the loadData call
-    const timeoutId = setTimeout(() => {
-      loadData();
-    }, 100);
-
-    const handleAction = (event) => {
-      const customEvent = event;
-      const { action } = customEvent.detail;
-      if (action === 'tour') {
-        setRunTour(true);
-      }
-    };
-
-    window.addEventListener('actionTriggered', handleAction);
-    
-    // Also handle URL params on first load
-    const action = searchParams.get('action');
-    if (action === 'tour') {
-        setRunTour(true);
-        setSearchParams({}); // Clear the action from URL
-    }
-
-    return () => {
-      clearTimeout(timeoutId); // Clear timeout on unmount or re-run of effect
-      window.removeEventListener('actionTriggered', handleAction);
-    };
-  }, [searchParams]);
-
-  const loadData = async () => {
-    setIsLoading(true);
-    setHasError(false);
-    try {
-      const currentUser = await withRetry(() => User.me());
-      setUser(currentUser);
-
-      if (!currentUser.family_id) {
-        navigate(createPageUrl("FamilySetup"));
-        return;
-      }
-
-      const familyId = currentUser.family_id;
-      
-      let familyData = null;
-      try {
-        familyData = await withRetry(() => Family.get(familyId));
-        setFamily(familyData);
-      } catch (familyError) {
-        console.error("Family not found:", familyError);
-        if (familyError.response?.status === 429) {
-          setHasError(true);
-          toast({ duration: 5000, 
-            title: 'Rate Limit Exceeded', 
-            description: 'Too many requests. Please wait a moment and refresh.', 
-            variant: "destructive" , 
-            duration: 5000 
-          });
-          return;
-        }
-        try {
-          await User.updateMyUserData({ family_id: null });
-          navigate(createPageUrl("Index"));
-          return;
-        } catch (updateError) {
-          console.error("Failed to clear family_id:", updateError);
-          setHasError(true);
-          return;
-        }
-      }
-
-      const dataPromises = [
-        withRetry(() => ScheduleEvent.filter({ family_id: familyId }, '-start_time', 1000)).catch(() => []),
-        withRetry(() => Task.filter({ family_id: familyId }, 'due_date', 1000)).catch(() => []),
-        withRetry(() => FamilyMember.filter({ family_id: familyId }, '-created_date')).catch(() => [])
-      ];
-      
-      const [eventsData, tasksData, membersData] = await Promise.all(dataPromises);
-      
-      setEvents(eventsData);
-      setTasks(tasksData);
-      setFamilyMembers(membersData);
-      
-    } catch (error) {
-      console.error("Error loading dashboard data:", error);
-      if (error.response?.status === 401) {
-         navigate(createPageUrl("Index"));
-      } else if (error.response?.status === 429) {
-        setHasError(true);
-  toast({ duration: 5000, 
-          title: 'Rate Limit Exceeded', 
-          description: 'Too many requests. Please wait a moment and refresh.', 
-          variant: "destructive" , 
-          duration: 5000 
-        });
-      } else {
-        setHasError(true);
-  toast({ title: t('errorLoadingData'), description: t('couldNotLoadDashboard'), variant: "destructive", duration: 5000  });
-      }
-    }
-    setIsLoading(false);
-  };
-  
   // Get upcoming events sorted by date - improved filtering
   // Only show first instance of recurring events
   const upcomingEvents = events
@@ -237,7 +122,7 @@ export default function Dashboard() {
     localStorage.setItem('famlyai_tour_dashboard_completed', 'true');
   };
 
-  if (hasError) {
+  if (error || hasError) {
     return (
       <div className="p-6 text-center">
         <div className="max-w-md mx-auto">
@@ -289,33 +174,45 @@ export default function Dashboard() {
     setSelectedTimeSlot(null);
   };
   const handleProcessSave = async (eventData, _ignored, editType = "single") => {
-    // No AI review for now, just save directly
+    // Prevent event creation if user or family_id is not loaded
+    if (!user || !user.family_id) {
+      toast({
+        title: t('userNotLoaded') || 'User not loaded',
+        description: t('pleaseWaitForUser') || 'Please wait for your user to load before creating an event.',
+        variant: 'destructive',
+        duration: 5000
+      });
+      return;
+    }
     try {
       if (editEvent && editEvent.id) {
         await ScheduleEvent.update(editEvent.id, eventData);
-        setEvents(prev => prev.map(e => e.id === editEvent.id ? { ...e, ...eventData } : e));
-  toast({ title: t('eventUpdated'), description: eventData.title, variant: 'success', duration: 5000 });
+        reload();
+        toast({ title: t('eventUpdated'), description: eventData.title, variant: 'success', duration: 5000 });
       } else {
         // Ensure family_id is included for new events
-        const newEvent = { ...eventData, family_id: user?.family_id };
+        const newEvent = { ...eventData, family_id: user.family_id };
+        console.log('[FamlyAI] Creating event with payload:', newEvent);
         const created = await ScheduleEvent.create(newEvent);
-        setEvents(prev => [...prev, created]);
-  toast({ title: t('eventCreated'), description: eventData.title, variant: 'success', duration: 5000 });
+        console.log('[FamlyAI] ScheduleEvent.create response:', created);
+        reload();
+        toast({ title: t('eventCreated'), description: eventData.title, variant: 'success', duration: 5000 });
       }
       handleDialogClose();
     } catch (error) {
-  toast({ title: t('errorSavingEvent'), description: eventData.title, variant: 'destructive', duration: 5000 });
+      console.error('[FamlyAI] Error in handleProcessSave:', error);
+      toast({ title: t('errorSavingEvent'), description: eventData.title, variant: 'destructive', duration: 5000 });
     }
   };
   const handleDialogDelete = async (event) => {
     if (!window.confirm(t('confirmDeleteEvent') || 'Delete this event?')) return;
     try {
       await ScheduleEvent.delete(event.id);
-      setEvents(prev => prev.filter(e => e.id !== event.id));
-  toast({ title: t('eventDeleted'), description: event.title, variant: 'success', duration: 5000 });
+      reload();
+      toast({ title: t('eventDeleted'), description: event.title, variant: 'success', duration: 5000 });
       handleDialogClose();
     } catch (error) {
-  toast({ title: t('errorDeletingEvent'), description: event.title, variant: 'destructive', duration: 5000 });
+      toast({ title: t('errorDeletingEvent'), description: event.title, variant: 'destructive', duration: 5000 });
     }
   };
 
@@ -331,6 +228,7 @@ export default function Dashboard() {
         initialData={editEvent}
         selectedDate={selectedTimeSlot?.date}
         selectedHour={selectedTimeSlot?.hour}
+        userLoaded={!!user && !!user.family_id}
       />
       <div className="grid lg:grid-cols-4 gap-6">
         <motion.div id="weekly-schedule-preview" className="lg:col-span-2" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}>

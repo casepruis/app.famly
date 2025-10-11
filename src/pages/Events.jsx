@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from "react";
-import { ScheduleEvent, FamilyMember, User } from "@/api/entities";
+import { useFamilyData } from "@/hooks/FamilyDataContext";
 import { motion } from "framer-motion";
 import { useLanguage } from "@/components/common/LanguageProvider";
 import { useToast } from "@/components/ui/use-toast";
@@ -123,19 +123,14 @@ const EventListItem = ({ event, familyMembers, onEdit, onDelete }) => {
 };
 
 
-export default function EventsPage() {
-  const [events, setEvents] = useState([]);
-  const [familyMembers, setFamilyMembers] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+function Events() {
+  const { user, family, members: familyMembers, events, isLoading, error, reload } = useFamilyData();
   const [filters, setFilters] = useState({ category: 'all', search: '' });
   const { t } = useLanguage();
   const { toast } = useToast();
   const [editEvent, setEditEvent] = useState(null);
-
-  // --- Schedule-like event dialog logic ---
   const [selectedTimeSlot, setSelectedTimeSlot] = useState(null);
   useEffect(() => {
-    loadData();
     const handler = (e) => {
       if (e?.detail?.action === 'new') {
         setEditEvent(null);
@@ -146,41 +141,9 @@ export default function EventsPage() {
     return () => window.removeEventListener('actionTriggered', handler);
   }, []);
 
-  const loadData = async () => {
-    setIsLoading(true);
-    try {
-      const user = await User.me();
-      if (!user || !user.family_id) {
-        setIsLoading(false);
-        return;
-      }
-      const [eventsData, membersData] = await Promise.all([
-        ScheduleEvent.filter({ family_id: user.family_id }, '-start_time', 1000),
-        FamilyMember.filter({ family_id: user.family_id })
-      ]);
-
-      const now = new Date();
-      const upcomingEvents = eventsData.filter((e) => {
-        const end = e?.end_time ? new Date(e.end_time) : null;
-        const start = e?.start_time ? new Date(e.start_time) : null;
-
-        // prefer end_time to keep ongoing events; fall back to start_time
-        const pivot = (end && !isNaN(end)) ? end : (start && !isNaN(start) ? start : null);
-        return pivot && pivot >= now;
-      });
-      setEvents(upcomingEvents);
-      setFamilyMembers(membersData);
-    } catch (error) {
-      console.error("Error loading events:", error);
-  toast({ title: t('errorLoadingData'), variant: "destructive", duration: 5000 });
-    }
-    setIsLoading(false);
-  };
-
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value }));
   };
-
 
   const handleEditEvent = (event) => {
     setEditEvent(event);
@@ -196,16 +159,15 @@ export default function EventsPage() {
     try {
       if (editEvent && editEvent.id) {
         await ScheduleEvent.update(editEvent.id, eventData);
-        setEvents(prev => prev.map(e => e.id === editEvent.id ? { ...e, ...eventData } : e));
-    toast({ title: t('eventUpdated'), description: eventData.title, variant: 'success', duration: 5000 });
+        toast({ title: t('eventUpdated'), description: eventData.title, variant: 'success', duration: 5000 });
       } else {
-        const created = await ScheduleEvent.create(eventData);
-        setEvents(prev => [...prev, created]);
-    toast({ title: t('eventCreated'), description: eventData.title, variant: 'success', duration: 5000 });
+        await ScheduleEvent.create(eventData);
+        toast({ title: t('eventCreated'), description: eventData.title, variant: 'success', duration: 5000 });
       }
+      if (reload) await reload();
       handleDialogClose();
     } catch (error) {
-  toast({ title: t('errorSavingEvent'), description: eventData.title, variant: 'destructive', duration: 5000 });
+      toast({ title: t('errorSavingEvent'), description: eventData.title, variant: 'destructive', duration: 5000 });
     }
   };
 
@@ -213,17 +175,21 @@ export default function EventsPage() {
     if (!window.confirm(t('confirmDeleteEvent') || 'Delete this event?')) return;
     try {
       await ScheduleEvent.delete(event.id);
-      setEvents(prev => prev.filter(e => e.id !== event.id));
-  toast({ title: t('eventDeleted'), description: event.title, variant: 'success', duration: 5000 });
+      toast({ title: t('eventDeleted'), description: event.title, variant: 'success', duration: 5000 });
+      if (reload) await reload();
       handleDialogClose();
     } catch (error) {
-  toast({ title: t('errorDeletingEvent'), description: event.title, variant: 'destructive', duration: 5000 });
+      toast({ title: t('errorDeletingEvent'), description: event.title, variant: 'destructive', duration: 5000 });
     }
   };
 
   const filteredEvents = useMemo(() => {
+    const now = new Date();
     return events
       .filter(event => {
+        // Only show events that end in the future (or have no end_time and start in the future)
+        const end = event.end_time ? new Date(event.end_time) : new Date(event.start_time);
+        if (end < now) return false;
         const categoryMatch = filters.category === 'all' || event.category === filters.category;
         const searchMatch = !filters.search || event.title.toLowerCase().includes(filters.search.toLowerCase()) || (event.description && event.description.toLowerCase().includes(filters.search.toLowerCase()));
         return categoryMatch && searchMatch;
@@ -291,3 +257,5 @@ export default function EventsPage() {
     </div>
   );
 }
+
+export default Events;

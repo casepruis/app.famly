@@ -37,20 +37,19 @@ export default function FunFactCard() {
   useEffect(() => {
     let canceled = false;
 
-    const generateFunFact = async () => {
-      setIsLoadingFact(true);
-
-      const delays = [0, 3000, 7000]; // start immediately, then 3s, then 7s
-
-      try {
-        for (let i = 0; i < delays.length; i++) {
-          try {
-            // wait before attempt
-            if (delays[i] > 0) {
-              await new Promise((r) => setTimeout(r, delays[i]));
-            }
-
-            const result = await InvokeLLM({
+    // Delay LLM call by 2s to let UI render instantly
+    const timeout = setTimeout(() => {
+      const generateFunFact = async () => {
+        setIsLoadingFact(true);
+        const delays = [0, 3000, 7000]; // start immediately, then 3s, then 7s
+        try {
+          for (let i = 0; i < delays.length; i++) {
+            try {
+              // wait before attempt
+              if (delays[i] > 0) {
+                await new Promise((r) => setTimeout(r, delays[i]));
+              }
+              const result = await InvokeLLM({
               prompt: `Provide a short, interesting, and family-friendly "fun fact of the day". Keep it under 50 words.
 
   IMPORTANT: Respond ONLY in ${currentLanguage}. Use proper grammar and natural phrasing for ${currentLanguage}. Make it engaging and educational.`,
@@ -98,45 +97,49 @@ export default function FunFactCard() {
             if (isLast) {
               setFunFact(getFallbackFact());
             }
-            // else: loop continues to next delay
           }
         }
       } finally {
-        if (!canceled) setIsLoadingFact(false); // ✅ always clear spinner
+        if (!canceled) setIsLoadingFact(false);
       }
     };
-
     generateFunFact();
-
-    return () => {
-      canceled = true;
-    };
-  }, [currentLanguage]);
-
-
-  return (
-    <Card className="border-famly-accent bg-white">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base font-semibold text-famly-text-primary">
-          <Lightbulb className="w-5 h-5 text-yellow-400" />
-          {t('funFact') || 'Fun Fact'}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <div className="min-h-[80px] flex items-start">
-          <div className="min-h-[80px] flex items-start text-sm text-famly-text-secondary leading-relaxed">
-            {isLoadingFact ? (
-              <div className="flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                {retryCount > 0 && <span className="text-xs">Retrying...</span>}
-              </div>
-            ) : (
-              <p>{funFact}</p> // ✅ safe to use <p> here because it's plain text
-            )}
+  }, 2000);
+  return () => {
+    canceled = true;
+    clearTimeout(timeout);
+  };
+    }, [currentLanguage]);
+    
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Lightbulb className="w-5 h-5 text-yellow-400" />
+            {t("Fun Fact of the Day")}
+          </CardTitle>
+        </CardHeader>
+        {/* <CardContent>
+          {isLoadingFact ? (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="animate-spin w-4 h-4" />
+              {t("Loading...")}
+            </div>
+          ) : (
+            <div>{funFact}</div>
+          )}
+        </CardContent> */}
+        <CardContent>
+          <div className="min-h-[50px] flex items-start">
+            <div className="text-sm text-famly-text-secondary leading-relaxed">
+              {isLoadingFact ? (
+                <span className="flex items-center gap-2 text-gray-400"><Loader2 className="w-4 h-4 animate-spin" /> {t('loading') || 'Loading...'}</span>
+              ) : (
+                funFact
+              )}
+            </div>
           </div>
-
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
+        </CardContent>
+      </Card>
+    );
+  }

@@ -202,7 +202,7 @@ const generateShortTitleWithAI = async (eventData, currentLanguage) => {
     }
 };
 
-export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyMembers, initialData = null, selectedDate = null, selectedHour = null, preselectedMemberId = null }) {
+export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyMembers, initialData = null, selectedDate = null, selectedHour = null, preselectedMemberId = null, userLoaded = true }) {
     const { t, currentLanguage } = useLanguage();
     const { toast } = useToast();
     const [isProcessing, setIsProcessing] = useState(false);
@@ -587,7 +587,7 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
                                 <PopoverContent className="w-64 p-3">
                                     <div className="space-y-3">
                                         <div className="font-medium">{t('selectMembers') || 'Select members'}:</div>
-                                        {familyMembers?.map(member => (
+                                        {familyMembers?.filter(m => m.role !== 'ai_assistant').map(member => (
                                             <div key={member.id} className="flex items-center space-x-2">
                                                 <Checkbox id={`member-${member.id}`} checked={(eventData.family_member_ids || []).includes(member.id)} onCheckedChange={() => handleMemberToggle(member.id)} />
                                                 <label htmlFor={`member-${member.id}`} className="flex items-center gap-2 font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
@@ -648,7 +648,7 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
                                 <Button type="button" variant="outline" onClick={() => {onClose(); setShowRecurringOptions(false);}}>
                                     {t('cancel') || 'Cancel'}
                                 </Button>
-                                <Button type="submit" className="bg-blue-600 hover:bg-blue-700" disabled={isProcessing}>
+                                <Button type="submit" className="bg-blue-600 hover:bg-blue-700" disabled={isProcessing || !userLoaded}>
                                     {isProcessing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
                                     {showRecurringOptions ? (t('selectOption') || 'Select Option') : (initialData ? (t('update') || 'Update') : (t('create') || 'Create'))}
                                 </Button>

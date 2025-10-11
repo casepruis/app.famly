@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from "react";
+import { useFamilyData } from "@/hooks/FamilyDataContext";
 import { FamilyMember, User, Conversation, UserWhitelist, FamilyInvitation, Family } from "@/api/entities";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from 'framer-motion';
@@ -27,11 +28,8 @@ const availableColors = [
 ];
 
 export default function FamilyMembers() {
-  const [members, setMembers] = useState([]);
-  const [currentUserMember, setCurrentUserMember] = useState(null);
-  const [family, setFamily] = useState(null); // Added family state
+  const { user, family, members, isLoading, reload } = useFamilyData();
   const [invitations, setInvitations] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingMember, setEditingMember] = useState(null);
   const [runTour, setRunTour] = useState(false);
@@ -45,84 +43,27 @@ export default function FamilyMembers() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
-    loadMembers();
-    
+    // Invitations are not in FamilyDataContext, so fetch them here
+    async function fetchInvitations() {
+      if (!user?.family_id) return setInvitations([]);
+      const data = await FamilyInvitation.filter({ family_id: user.family_id, status: 'pending' }).catch(() => []);
+      setInvitations(Array.isArray(data) ? data : []);
+    }
+    fetchInvitations();
+
     const handleAction = (event) => {
       const { action } = event.detail;
       if (action === 'new') handleAddNew();
       else if (action === 'tour') setRunTour(true);
     };
-    
     window.addEventListener('actionTriggered', handleAction);
-    
     const action = searchParams.get('action');
-    if (action === 'new') { handleAddNew(); setSearchParams({}); } 
+    if (action === 'new') { handleAddNew(); setSearchParams({}); }
     else if (action === 'tour') { setRunTour(true); setSearchParams({}); }
-    
     return () => window.removeEventListener('actionTriggered', handleAction);
-  }, [searchParams, setSearchParams]);
+  }, [user, searchParams, setSearchParams]);
 
-  const loadMembers = async () => {
-    setIsLoading(true);
-    try {
-      const user = await User.me();
-      if (!user?.family_id) {
-        navigate(createPageUrl("Index"));
-        return;
-      }
-      
-      const [membersData, invitationsData, familyData] = await Promise.all([
-        FamilyMember.filter(),//{ family_id: user.family_id }, 'created_date'),
-        FamilyInvitation.filter({ family_id: user.family_id, status: 'pending' }).catch(() => []),
-        Family.get(user.family_id).catch(() => null)
-      ]);
 
-      // ⛔ Check for missing IDs
-      membersData.forEach((m, i) => {
-        if (!m.id) {
-          console.warn(`⚠️ Member ${i} missing ID:`, m);
-        }
-      });
-      
-      // Ensure membersData is an array
-      const safeMembers = Array.isArray(membersData) ? membersData : [];
-      const safeInvitations = Array.isArray(invitationsData) ? invitationsData : [];
-      
-      const loggedInMember = safeMembers.find(m => m.user_id === user.id);
-      setCurrentUserMember(loggedInMember);
-
-      const hasAIAssistant = safeMembers.some(m => m.role === 'ai_assistant');
-
-      if (!hasAIAssistant && user.family_id) {
-        const aiMember = await FamilyMember.create({
-          name: 'Famly AI',
-          role: 'ai_assistant',
-          family_id: user.family_id,
-          color: '#8D33FF'  // Pick a consistent purple AI color
-        });
-
-        safeMembers.push(aiMember); // Push it to your array so it renders immediately
-      }
-      
-      setMembers(safeMembers);
-      setInvitations(safeInvitations);
-      setFamily(familyData); // Set family data
-      setFamilyNameInput(familyData?.name || "");
-
-    } catch (error) {
-      console.error("Error loading family members:", error);
-      toast({
-        title: t('error') || 'Error',
-        description: t('couldNotLoadMembers') || 'Could not load family members',
-        variant: "destructive", 
-        duration: 5000 
-      });
-      setMembers([]);
-      setInvitations([]);
-      setFamily(null); // Clear family data on error
-    }
-    setIsLoading(false);
-  };
 
   const handleAddNew = () => {
     setEditingMember(null);

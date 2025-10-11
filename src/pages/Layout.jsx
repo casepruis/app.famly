@@ -389,8 +389,9 @@ function LayoutContent({ children, currentPageName }) {
     const connect = () => {
       if (closed) return;
 
-      const ws = new WebSocket(`${WS_BASE}/ws?token=${encodeURIComponent(token)}`);
-      wsRef.current = ws;
+  const ws = new WebSocket(`${WS_BASE}/ws?token=${encodeURIComponent(token)}`);
+  wsRef.current = ws;
+  window.famlyWS = ws; // Expose globally for FamilyDataProvider
 
       ws.onopen = () => {
         console.log("📡 Layout WebSocket connected");
@@ -455,15 +456,17 @@ function LayoutContent({ children, currentPageName }) {
       if (pingRef.current) { clearInterval(pingRef.current); pingRef.current = null; }
       try { wsRef.current?.close(); } catch {}
       wsRef.current = null;
+      if (window.famlyWS === wsRef.current) window.famlyWS = null;
     };
   }, [currentUser, family, currentFamilyMember]);
 
+  // Only load data once on mount or when loadData changes (not on every navigation)
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       loadData();
     }, 100);
     return () => clearTimeout(timeoutId);
-  }, [loadData, location.pathname]);
+  }, [loadData]);
 
   useEffect(() => {
     const handleChatRead = (event) => {

@@ -1,13 +1,12 @@
 
 import React, { useState, useEffect, useMemo } from "react";
-import { Task } from "@/api/entities";
-import { FamilyMember } from "@/api/entities";
-import { User } from "@/api/entities";
+import { useFamilyData } from "@/hooks/FamilyDataContext";
 import { AnimatePresence, motion } from "framer-motion";
 import { useSearchParams } from "react-router-dom";
 import TaskCard from "../components/tasks/TaskCard";
 import TaskForm from "../components/tasks/TaskForm";
 import TaskFilters from "../components/tasks/TaskFilters";
+import { Task } from "@/api/entities";
 import { useLanguage } from "@/components/common/LanguageProvider";
 import { useToast } from "@/components/ui/use-toast";
 import Joyride from "../components/common/Joyride";
@@ -16,15 +15,13 @@ import { CheckCircle2 } from "lucide-react"; // Added import
 import { InvokeLLM } from "@/api/integrations"; // ✅ NEW
 
 
-export default function Tasks() {
+function Tasks() {
   const [isInferring, setIsInferring] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [tasks, setTasks] = useState([]);
-  const [familyMembers, setFamilyMembers] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [editingTask, setEditingTask] = useState(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [runTour, setRunTour] = useState(false);
+  const { user, family, members: familyMembers, tasks, isLoading, error, reload } = useFamilyData();
 
   // --- where you have: const { t } = useLanguage();
   const { t, currentLanguage } = useLanguage(); // ✅ include currentLanguage
@@ -115,8 +112,6 @@ export default function Tasks() {
   ], [t]);
 
   useEffect(() => {
-    loadData();
-    
     const handleAction = (event) => {
       const { action } = event.detail;
       if (action === 'new') {
@@ -128,7 +123,7 @@ export default function Tasks() {
     };
 
     window.addEventListener('actionTriggered', handleAction);
-    
+
     // Also handle URL params on first load
     const action = searchParams.get('action');
     if (action === 'new') {
@@ -145,25 +140,6 @@ export default function Tasks() {
     };
   }, [searchParams]);
 
-  const loadData = async () => {
-    setIsLoading(true);
-    try {
-      const user = await User.me();
-      const familyId = user.family_id;
-      const [tasksData, membersData] = await Promise.all([
-        Task.filter({ family_id: familyId }, '-created_date', 200),
-        FamilyMember.filter({ family_id: familyId })
-      ]);
-      setTasks(tasksData);
-      setFamilyMembers(membersData);
-    } catch (error) {
-      console.error("Error loading tasks data:", error);
-      toast({ title: "Error", description: "Failed to load tasks", variant: "destructive" , duration: 5000 });
-    } finally {
-        setIsLoading(false);
-    }
-  };
-
   const handleFilterChange = (newFilters) => {
     setFilters(newFilters);
     const newSearchParams = new URLSearchParams();
@@ -178,88 +154,71 @@ export default function Tasks() {
   };
   
   const handleSaveTask = async (taskData) => {
-  try {
-    const user = await User.me();
-    let taskToSave = { ...taskData, family_id: user.family_id };
+    try {
+      if (!user) throw new Error("User not loaded");
+      let taskToSave = { ...taskData, family_id: user.family_id };
 
-    const noDateProvided = !taskToSave.due_date || String(taskToSave.due_date).trim() === "";
-    if (!editingTask && noDateProvided && taskToSave.title) {
-      setIsInferring(true);
-      const { due_date, confidence, normalized_title } =
-        await inferDueDateWithLLM(taskToSave.title, currentLanguage);
-      setIsInferring(false);
+      const noDateProvided = !taskToSave.due_date || String(taskToSave.due_date).trim() === "";
+      if (!editingTask && noDateProvided && taskToSave.title) {
+        setIsInferring(true);
+        const { due_date, confidence, normalized_title } =
+          await inferDueDateWithLLM(taskToSave.title, currentLanguage);
+        setIsInferring(false);
 
-      if (normalized_title && !taskToSave.title_locked) {
-        taskToSave.title = normalized_title;
-      }
-
-      if (due_date && confidence >= 0.6) {
-        const when = new Date(due_date.replace(" ", "T"));
-        const whenDisplay = when.toLocaleString(currentLanguage, {
-          weekday: "short", year: "numeric", month: "short", day: "numeric",
-          hour: "2-digit", minute: "2-digit", hour12: false,
-        });
-        const ok = window.confirm(
-          t("task.llmInferredDueDateConfirm", { when: whenDisplay }) ||
-          `Use inferred due date "${whenDisplay}"?`
-        );
-        if (ok) {
-          taskToSave.due_date = due_date;
-        } else {
-          toast({
-            title: t("task.dueDateNeededTitle") || "Due date needed",
-            description: t("task.dueDateNeededDescription") || "Please pick a due date before saving.",
-            duration: 5000 
-          });
-          setIsFormOpen(true);
-          setEditingTask(taskData);
-          return;
+        if (normalized_title && !taskToSave.title_locked) {
+          taskToSave.title = normalized_title;
         }
-      } else {
-        toast({
-          title: t("task.noDateDetectedTitle") || "No clear date detected",
-          description: t("task.noDateDetectedDescription") || "Please set a due date so we can schedule this properly.",
-          duration: 5000 
-        });
-        setIsFormOpen(true);
-        setEditingTask(taskData);
-        return;
+
+        if (due_date && confidence >= 0.6) {
+          const when = new Date(due_date.replace(" ", "T"));
+          const whenDisplay = when.toLocaleString(currentLanguage, {
+            weekday: "short", year: "numeric", month: "short", day: "numeric",
+            hour: "2-digit", minute: "2-digit", hour12: false,
+          });
+          const ok = window.confirm(
+            t("task.llmInferredDueDateConfirm", { when: whenDisplay }) ||
+            `Use inferred due date "${whenDisplay}"?`
+          );
+          if (ok) {
+            taskToSave.due_date = due_date;
+          }
+        }
+        // If no due date is detected or user declines, just continue and allow saving without a due date
       }
-    }
 
-    setIsSaving(true);
-    if (editingTask) {
-      await Task.update(editingTask.id, taskToSave);
-      toast({ title: t("task.updatedTitle"), description: "Task updated", duration: 5000 });
-    } else {
-      await Task.create(taskToSave);  // backend now generates id
-      toast({ title: t("task.createdTitle"), description: "Task created", duration: 5000  });
-    }
-    setIsSaving(false);
+      setIsSaving(true);
+      if (editingTask) {
+        await Task.update(editingTask.id, taskToSave);
+        toast({ title: t("task.updatedTitle"), description: "Task updated", duration: 5000 });
+      } else {
+        await Task.create(taskToSave);  // backend now generates id
+        toast({ title: t("task.createdTitle"), description: "Task created", duration: 5000  });
+      }
+      setIsSaving(false);
 
-    setIsFormOpen(false);
-    setEditingTask(null);
-    loadData();
-  } catch (error) {
-    setIsInferring(false);
-    setIsSaving(false);
-    console.error("Error saving task:", error);
-    toast({
-      title: t("error"),
-      description:
-        (error && error.detail && (error.detail.detail || error.detail)) ||
-        t("task.saveError"),
-      variant: "destructive",
-      duration: 5000 
-    });
-  }
-};
+      setIsFormOpen(false);
+      setEditingTask(null);
+      if (reload) await reload();
+    } catch (error) {
+      setIsInferring(false);
+      setIsSaving(false);
+      console.error("Error saving task:", error);
+      toast({
+        title: t("error"),
+        description:
+          (error && error.detail && (error.detail.detail || error.detail)) ||
+          t("task.saveError"),
+        variant: "destructive",
+        duration: 5000 
+      });
+    }
+  };
 
   
   const handleDeleteTask = async (taskId) => {
     try {
         await Task.delete(taskId);
-        loadData();
+  if (reload) await reload();
         toast({ title: t("task.deletedTitle") , duration: 5000 });
     } catch (error) {
         toast({ title: t("error"), description: t("task.deleteError"), variant: "destructive" , duration: 5000 });
@@ -296,73 +255,75 @@ export default function Tasks() {
 
   if (isLoading) return <div className="p-6 text-center">{t('loading')}...</div>;
 
-return (
-  <div className="p-6 max-w-4xl mx-auto relative">
-    {(isInferring || isSaving) && (
-      <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center z-20">
-        <div className="px-4 py-3 rounded-lg border bg-white shadow-sm text-sm">
-          {isInferring
-            ? (t('task.inferencingDueDate') || 'Analyzing task title…')
-            : (t('task.savingTask') || 'Saving task…')}
-        </div>
-      </div>
-    )}
-
-    <Joyride steps={tasksTourSteps} run={runTour} onComplete={handleTourComplete} />
-
-    <div className="task-filters-container mb-6">
-      <TaskFilters
-        filters={filters}
-        onFilterChange={handleFilterChange}
-        familyMembers={familyMembers}
-      />
-    </div>
-
-    <div className="tasks-list-container space-y-4">
-      <AnimatePresence>
-        {filteredTasks.length > 0 ? (
-          filteredTasks.map(task => (
-            <motion.div
-              key={task.id}
-              layout
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-            >
-              <TaskCard
-                task={task}
-                familyMembers={familyMembers}
-                onEdit={handleEditTask}
-                onStatusChange={(taskToChange, status) => handleStatusChange(taskToChange.id, status)}
-                onDelete={() => handleDeleteTask(task.id)}
-              />
-            </motion.div>
-          ))
-        ) : (
-          <div className="text-center py-20 text-gray-500">
-            <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-              <CheckCircle2 className="w-8 h-8 text-gray-400" />
-            </div>
-            <h3 className="text-lg font-semibold mb-2">{t('allClear')}</h3>
-            <p className="text-sm">{t('noTasksMatchFilters')}</p>
+  return (
+    <div className="p-6 max-w-4xl mx-auto relative">
+      {(isInferring || isSaving) && (
+        <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center z-20">
+          <div className="px-4 py-3 rounded-lg border bg-white shadow-sm text-sm">
+            {isInferring
+              ? (t('task.inferencingDueDate') || 'Analyzing task title…')
+              : (t('task.savingTask') || 'Saving task…')}
           </div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
+
+      <Joyride steps={tasksTourSteps} run={runTour} onComplete={handleTourComplete} />
+
+      <div className="task-filters-container mb-6">
+        <TaskFilters
+          filters={filters}
+          onFilterChange={handleFilterChange}
+          familyMembers={familyMembers}
+        />
+      </div>
+
+      <div className="tasks-list-container space-y-4">
+        <AnimatePresence>
+          {filteredTasks.length > 0 ? (
+            filteredTasks.map(task => (
+              <motion.div
+                key={task.id}
+                layout
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ duration: 0.2 }}
+              >
+                <TaskCard
+                  task={task}
+                  familyMembers={familyMembers}
+                  onEdit={handleEditTask}
+                  onStatusChange={(taskToChange, status) => handleStatusChange(taskToChange.id, status)}
+                  onDelete={() => handleDeleteTask(task.id)}
+                />
+              </motion.div>
+            ))
+          ) : (
+            <div className="text-center py-20 text-gray-500">
+              <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
+                <CheckCircle2 className="w-8 h-8 text-gray-400" />
+              </div>
+              <h3 className="text-lg font-semibold mb-2">{t('allClear')}</h3>
+              <p className="text-sm">{t('noTasksMatchFilters')}</p>
+            </div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      <TaskForm
+        isOpen={isFormOpen}
+        onClose={() => { setIsFormOpen(false); setEditingTask(null); }}
+        onSave={handleSaveTask}
+        task={editingTask}
+        familyMembers={familyMembers}
+        busy={isInferring || isSaving}          // 👈 NEW
+        inferring={isInferring}                 // optional: show specific copy
+        saving={isSaving}                       // optional
+      />
+
     </div>
-
-    <TaskForm
-      isOpen={isFormOpen}
-      onClose={() => { setIsFormOpen(false); setEditingTask(null); }}
-      onSave={handleSaveTask}
-      task={editingTask}
-      familyMembers={familyMembers}
-      busy={isInferring || isSaving}          // 👈 NEW
-      inferring={isInferring}                 // optional: show specific copy
-      saving={isSaving}                       // optional
-    />
-
-  </div>
-);
-
+  );
 }
+
+export default Tasks;
+

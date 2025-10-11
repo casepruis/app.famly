@@ -6,6 +6,7 @@ import {
   parseISO, startOfDay, endOfDay
 } from "date-fns";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useFamilyData } from "@/hooks/FamilyDataContext";
 import { createPageUrl } from "@/utils";
 import { useLanguage } from "@/components/common/LanguageProvider";
 import { Button } from "@/components/ui/button";
@@ -97,13 +98,11 @@ const generateRecurringEvents = (baseEvent) => {
 };
 
 export default function Schedule() {
-  const [events, setEvents] = useState([]);
-  const [familyMembers, setFamilyMembers] = useState([]);
+  const { user, family, members: familyMembers, events, isLoading, error, reload } = useFamilyData();
   const [selectedMembers, setSelectedMembers] = useState([]);
   const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
   const [currentViewDate, setCurrentViewDate] = useState(new Date());
   const [runTour, setRunTour] = useState(false);
   const [reviewData, setReviewData] = useState(null);
@@ -112,7 +111,7 @@ export default function Schedule() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [dashboardFavorite, setDashboardFavorite] = useState(null);
   const [isMembersSidebarOpen, setIsMembersSidebarOpen] = useState(false);
-  const [familyId, setFamilyId] = useState(null);
+  const familyId = user?.family_id;
   
   const navigate = useNavigate();
   const { t } = useLanguage();
@@ -133,7 +132,7 @@ export default function Schedule() {
     setDashboardFavorite(newFavorite);
     try {
       await User.updateMyUserData({ dashboard_favorite_view: newFavorite });
-  toast({ duration: 5000,
+  toast({
         title: newFavorite ? t("dashboardFavoriteSet") || "Dashboard favorite set" : t("dashboardFavoriteRemoved") || "Dashboard favorite removed",
         description: newFavorite
           ? `${calendarView === "weekly" ? t("weekly") : t("byMember")} view will be used on dashboard`
@@ -146,18 +145,12 @@ export default function Schedule() {
   };
 
   useEffect(() => {
-    (async () => {
-      try {
-        const user = await User.me();
-        if (!user?.family_id) { navigate(createPageUrl("Index")); return; }
-        setFamilyId(user.family_id);
-        if (user.preferred_calendar_view) setCalendarView(user.preferred_calendar_view);
-        if (user.dashboard_favorite_view) setDashboardFavorite(user.dashboard_favorite_view);
-        await loadData(user.family_id);
-      } catch (e) {
-        console.error("Failed to init schedule:", e);
-      }
-    })();
+    if (user && !user.family_id) {
+      navigate(createPageUrl("Index"));
+      return;
+    }
+    if (user?.preferred_calendar_view) setCalendarView(user.preferred_calendar_view);
+    if (user?.dashboard_favorite_view) setDashboardFavorite(user.dashboard_favorite_view);
 
     const handleAction = (event) => {
       const action = event.detail.action;
@@ -185,25 +178,9 @@ export default function Schedule() {
 
     return () => window.removeEventListener("actionTriggered", handleAction);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [searchParams, user]);
 
-  const loadData = async (fid) => {
-    setIsLoading(true);
-    try {
-      const [eventsData, membersData] = await Promise.all([
-        // order_by & limit supported by backend now
-        ScheduleEvent.filter({ family_id: fid }, "-start_time", 1000),
-        FamilyMember.filter({ family_id: fid }, "-created_date"),
-      ]);
 
-      setEvents(eventsData);
-      setFamilyMembers(membersData);
-      setSelectedMembers(membersData.filter(m => m.role !== "ai_assistant").map(m => m.id));
-    } catch (error) {
-      console.error("Error loading schedule data:", error);
-    }
-    setIsLoading(false);
-  };
 
   const handleEventClick = (event) => {
     const eventDate = parseISO(event.start_time);
@@ -317,7 +294,7 @@ Category: "${eventData.category || ""}"`,
             updateData.recurrence_id = null;
           }
           await ScheduleEvent.update(initialEvent.id, updateData);
-          toast({ duration: 5000,
+          toast({
             title: t("eventUpdated"),
             description:
               t("eventUpdatedDescription", { title: finalEventData.title }) +
@@ -341,7 +318,7 @@ Category: "${eventData.category || ""}"`,
           await Task.bulkCreate(tasksPayload);
         }
 
-  toast({ duration: 5000,
+  toast({
           title: t("eventSaved"),
           description:
             t("eventSavedDescription", { title: finalEventData.title }) +
@@ -357,7 +334,7 @@ Category: "${eventData.category || ""}"`,
       setReviewData(null);
       setSelectedEvent(null);
       setSelectedTimeSlot(null);
-      if (familyId) await loadData(familyId);
+  if (reload) await reload();
     }
   };
 
@@ -447,10 +424,10 @@ Category: "${eventData.category || ""}"`,
       }
     }
 
-    if (deletionSuccessful && familyId) {
+    if (deletionSuccessful && reload) {
       setIsEventDialogOpen(false);
       setSelectedEvent(null);
-      await loadData(familyId);
+      await reload();
     }
   };
 
@@ -467,24 +444,18 @@ Category: "${eventData.category || ""}"`,
 
   const toggleFullscreen = () => setIsFullscreen((s) => !s);
 
+  // Show all events except those assigned exclusively to ai_assistant
   const filteredEvents = useMemo(() => {
-    const eventsWithoutAI = events.filter((event) => {
+    return events.filter((event) => {
       if (!event.family_member_ids || event.family_member_ids.length === 0) return true;
+      // Only hide if all assignees are ai_assistant
       const nonAIAssignments = event.family_member_ids.filter((id) => {
         const member = familyMembers.find((m) => m.id === id);
         return member && member.role !== "ai_assistant";
       });
       return nonAIAssignments.length > 0 || event.family_member_ids.length === 0;
     });
-
-    const realFamilyMembersCount = familyMembers.filter((m) => m.role !== "ai_assistant").length;
-    if (selectedMembers.length === realFamilyMembersCount) return eventsWithoutAI;
-
-    return eventsWithoutAI.filter((event) => {
-      if (!event.family_member_ids || event.family_member_ids.length === 0) return true;
-      return event.family_member_ids.some((id) => selectedMembers.includes(id));
-    });
-  }, [events, selectedMembers, familyMembers]);
+  }, [events, familyMembers]);
 
   // Helper: stable YYYY-MM-DD for a Date in the user's TZ
   const makeDayKey = (tz) => {
@@ -496,7 +467,7 @@ Category: "${eventData.category || ""}"`,
 
   // Grab the user's tz once (profile → browser → UTC)
   const userTimezone =
-    (typeof user !== "undefined" && (user.timezone || user.time_zone)) ||
+    (user && (user.timezone || user.time_zone)) ||
     Intl.DateTimeFormat().resolvedOptions().timeZone ||
     "UTC";
 

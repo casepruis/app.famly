@@ -184,7 +184,7 @@ export default function TaskForm({
               <PopoverContent className="w-64 p-3">
                 <div className="space-y-3">
                   <div className="font-medium text-sm">{t("selectMembers")}:</div>
-                  {familyMembers?.map((member) => (
+                  {familyMembers?.filter(m => m.role !== 'ai_assistant').map((member) => (
                     <div key={member.id} className="flex items-center space-x-2">
                       <Checkbox
                         id={`task-member-${member.id}`}

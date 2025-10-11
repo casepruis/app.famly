@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, FamilyMember, ChatMessage, Conversation, Task, ScheduleEvent, WishlistItem } from '@/api/entities';
+import { ChatMessage, Conversation } from '@/api/entities';
+import { useFamilyData } from '@/hooks/FamilyDataContext';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Send, Loader2, Bot, Sparkles } from "lucide-react";
@@ -55,7 +56,7 @@ const isSameMessage = (a, b) => {
 
 export default function ChatWindow({ conversationId, participants }) {
   const [messages, setMessages] = useState([]);
-  const [familyMembers, setFamilyMembers] = useState([]);
+  const { user, members: familyMembers } = useFamilyData();
   const [currentUserMember, setCurrentUserMember] = useState(null);
   const [aiAssistant, setAiAssistant] = useState(null);
 
@@ -75,23 +76,9 @@ export default function ChatWindow({ conversationId, participants }) {
   const retryRef = useRef(0);
 
   // ---- AI helper: ensure AI member exists (frontend best effort; server is authoritative anyway) ----
-  const ensureAIAssistant = async (familyId) => {
-    const all = await FamilyMember.list();
-    let ai = all.find(m => m.role === 'ai_assistant' && m.family_id === familyId);
-    if (!ai) {
-      try {
-        ai = await FamilyMember.create({
-          name: "AI Assistent",
-          role: "ai_assistant",
-          family_id: familyId,
-          color: "#10b981",
-          language: "nl"
-        });
-      } catch {
-        // server may already create/own it; swallow
-      }
-    }
-    return ai || (await FamilyMember.list()).find(m => m.role === 'ai_assistant' && m.family_id === familyId) || null;
+  // Find AI assistant in context members
+  const ensureAIAssistant = (familyId) => {
+    return familyMembers.find(m => m.role === 'ai_assistant' && m.family_id === familyId) || null;
   };
 
   // ---- AI intro message (idempotent) ----
@@ -123,22 +110,18 @@ export default function ChatWindow({ conversationId, participants }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (!conversationId) return;
+      if (!conversationId || !user || !familyMembers.length) return;
       setIsLoading(true);
       setPendingAction(null);
       try {
-        const meUser = await User.me();
-        const meMember = await FamilyMember.me();
+        // Find current user as family member
+        const meMember = familyMembers.find(m => m.user_id === user.id);
         if (cancelled) return;
         setCurrentUserMember(meMember);
 
-        const ai = await ensureAIAssistant(meUser.family_id);
+        const ai = ensureAIAssistant(user.family_id);
         if (cancelled) return;
         setAiAssistant(ai);
-
-        const members = await FamilyMember.list();
-        if (cancelled) return;
-        setFamilyMembers(members);
 
         let initial = await ChatMessage.filter({ conversation_id: conversationId }, 'created_date');
         if (cancelled) return;
@@ -160,7 +143,6 @@ export default function ChatWindow({ conversationId, participants }) {
         }
 
         // Deduplicate AI intros (keep the first one only)
-        const seenIntro = false;
         const unique = [];
         for (const m of sortMessages(initial)) {
           if (m.message_type === 'ai_introduction') {
@@ -173,7 +155,7 @@ export default function ChatWindow({ conversationId, participants }) {
         window.dispatchEvent(new CustomEvent('famly-chat-opened', { detail: { conversationId } }));
       } catch (err) {
         console.error("Chat initialization error:", err);
-  toast({ duration: 5000,
+        toast({
           title: "Chat Error",
           description: "Kon chat niet initialiseren.",
           variant: "destructive",
@@ -184,7 +166,7 @@ export default function ChatWindow({ conversationId, participants }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [conversationId, toast]);
+  }, [conversationId, toast, user, familyMembers]);
 
   // ---- WebSocket live updates with reconnect ----
   useEffect(() => {
