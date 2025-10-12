@@ -1,5 +1,44 @@
+  // Conversion intent detection for chat
+  const handleConvertIntent = async (messageText) => {
+    const lower = messageText.toLowerCase();
+    if (lower.includes('convert') && lower.includes('event') && lower.includes('task')) {
+      // Try to get last event from messages
+      const lastEvent = Array.isArray(messages) && messages.length > 0 ? messages.filter(m => m.event_id).slice(-1)[0] : null;
+      if (lastEvent && lastEvent.event_id) {
+        setMessages(prev => [...prev, { sender_id: user.id, content: messageText, created_at: new Date().toISOString() }]);
+        setIsAiProcessing(true);
+        try {
+          await import('@/api/entities').then(({ ScheduleEvent }) => ScheduleEvent.toTask(lastEvent.event_id));
+          setMessages(prev => [...prev, { sender_id: 'ai', content: 'Event converted to task!', created_at: new Date().toISOString() }]);
+        } catch (e) {
+          setMessages(prev => [...prev, { sender_id: 'ai', content: 'Failed to convert event to task.', created_at: new Date().toISOString() }]);
+        }
+        setIsAiProcessing(false);
+        setInputValue('');
+        return true;
+      }
+    }
+    if (lower.includes('convert') && lower.includes('task') && lower.includes('event')) {
+      // Try to get last task from messages
+      const lastTask = Array.isArray(messages) && messages.length > 0 ? messages.filter(m => m.task_id).slice(-1)[0] : null;
+      if (lastTask && lastTask.task_id) {
+        setMessages(prev => [...prev, { sender_id: user.id, content: messageText, created_at: new Date().toISOString() }]);
+        setIsAiProcessing(true);
+        try {
+          await import('@/api/entities').then(({ Task }) => Task.toEvent(lastTask.task_id));
+          setMessages(prev => [...prev, { sender_id: 'ai', content: 'Task converted to event!', created_at: new Date().toISOString() }]);
+        } catch (e) {
+          setMessages(prev => [...prev, { sender_id: 'ai', content: 'Failed to convert task to event.', created_at: new Date().toISOString() }]);
+        }
+        setIsAiProcessing(false);
+        setInputValue('');
+        return true;
+      }
+    }
+    return false;
+  };
 import React, { useState, useEffect, useRef } from 'react';
-import { ChatMessage, Conversation } from '@/api/entities';
+import { ChatMessage, Conversation, Task, ScheduleEvent, WishlistItem } from '@/api/entities';
 import { useFamilyData } from '@/hooks/FamilyDataContext';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -262,8 +301,10 @@ export default function ChatWindow({ conversationId, participants }) {
 
   // ---- Send message (optimistic + reconcile) ----
   const handleSendMessage = async () => {
-  if (!inputValue.trim()) return;
-  if (isSending || !currentUserMember) return;
+    if (!inputValue.trim()) return;
+    if (isSending || !currentUserMember) return;
+    // Check for conversion intent first
+    if (await handleConvertIntent(inputValue.trim())) return;
 
   setIsSending(true);
   const content = inputValue.trim();
@@ -608,50 +649,67 @@ Return exact JSON:
 
                 {/* Anchor-mode: render reviewers under the AI suggestion message */}
                 {pendingAction && pendingAction.messageId && msg.id === pendingAction.messageId ? (
-                  <div className={`mt-2 ${isCurrentUser ? 'ml-auto' : 'ml-11'}`}>
-                    {pendingAction.tasks && pendingAction.tasks.length > 0 ? (
-                      <TasksReviewer
-                        tasks={pendingAction.tasks}
-                        familyMembers={familyMembers}
-                        onConfirm={(confirmed) => handleConfirmActions(confirmed, [], [])}
-                        onCancel={() => setPendingAction(null)}
-                      />
-                    ) : null}
-
-                    {pendingAction.events && pendingAction.events.length > 0 && (
-                      <VacationEventsReview
-                        events={pendingAction.events}
-                        onEventsUpdate={(updated) =>
-                          setPendingAction(prev => (prev ? { ...prev, events: updated } : prev))
-                        }
-                        onConfirm={(confirmed) => handleConfirmActions([], confirmed, [])}
-                        onCancel={() => setPendingAction(null)}
-                      />
-                    )}
-
-                    {pendingAction.wishlist_items && pendingAction.wishlist_items.length > 0 ? (
-                      <div className="p-3 bg-purple-50/50 border border-purple-200 rounded-lg shadow-sm space-y-2">
-                        <h4 className="font-semibold text-sm text-purple-800">Wishlist Items:</h4>
-                        {pendingAction.wishlist_items.map((item, i) => {
-                          const member = familyMembers.find(m => m.id === item.family_member_id);
-                          return (
-                            <div key={i} className="text-sm bg-white p-2 rounded border">
-                              <strong>{item.name}</strong> voor {member?.name}
-                            </div>
-                          );
-                        })}
-                        <div className="flex justify-end gap-2 pt-2">
-                          <Button variant="ghost" size="sm" onClick={() => setPendingAction(null)}>Annuleren</Button>
-                          <Button
-                            size="sm"
-                            onClick={() => handleConfirmActions([], [], pendingAction.wishlist_items)}
-                            className="bg-purple-600 hover:bg-purple-700"
-                          >
-                            Toevoegen
-                          </Button>
+                  <div className={`mt-2 ${isCurrentUser ? 'ml-auto' : 'ml-11'}`}> 
+                    <div className="rounded-xl border-2 border-blue-200 bg-blue-50/60 shadow-lg p-4 space-y-5 max-w-2xl">
+                      <h3 className="font-bold text-base text-blue-900 mb-2">AI Suggesties: kies wat je wilt toevoegen</h3>
+                      {pendingAction.tasks && pendingAction.tasks.length > 0 && (
+                        <div className="border border-green-200 bg-green-50/60 rounded-lg p-3 mb-2">
+                          <h4 className="font-semibold text-sm text-green-800 mb-2">Taken</h4>
+                          <TasksReviewer
+                            tasks={pendingAction.tasks}
+                            familyMembers={familyMembers}
+                            onChange={(updatedTasks) => setPendingAction(prev => prev ? { ...prev, tasks: updatedTasks } : prev)}
+                          />
                         </div>
+                      )}
+                      {pendingAction.events && pendingAction.events.length > 0 && (
+                        <div className="border border-emerald-200 bg-emerald-50/60 rounded-lg p-3 mb-2">
+                          <h4 className="font-semibold text-sm text-emerald-800 mb-2">Afspraken</h4>
+                          <VacationEventsReview
+                            events={pendingAction.events}
+                            onEventsUpdate={(updated) => setPendingAction(prev => prev ? { ...prev, events: updated } : prev)}
+                            onConfirm={null}
+                            onCancel={null}
+                          />
+                        </div>
+                      )}
+                      {pendingAction.wishlist_items && pendingAction.wishlist_items.length > 0 && (
+                        <div className="border border-purple-200 bg-purple-50/60 rounded-lg p-3 mb-2">
+                          <h4 className="font-semibold text-sm text-purple-800 mb-2">Wishlist Items</h4>
+                          {pendingAction.wishlist_items.map((item, i) => {
+                            const member = familyMembers.find(m => m.id === item.family_member_id);
+                            return (
+                              <div key={i} className="flex items-center gap-2 text-sm bg-white p-2 rounded border mb-1">
+                                <input
+                                  type="checkbox"
+                                  checked={item.selected !== false}
+                                  onChange={e => {
+                                    const updated = pendingAction.wishlist_items.map((w, idx) => idx === i ? { ...w, selected: e.target.checked } : w);
+                                    setPendingAction(prev => prev ? { ...prev, wishlist_items: updated } : prev);
+                                  }}
+                                />
+                                <strong>{item.name}</strong> voor {member?.name}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <div className="flex justify-end gap-2 pt-4 border-t border-blue-100 mt-4">
+                        <Button variant="ghost" size="sm" onClick={() => setPendingAction(null)}>Annuleren</Button>
+                        <Button
+                          size="sm"
+                          className="bg-blue-600 hover:bg-blue-700 font-semibold px-6"
+                          onClick={() => {
+                            const confirmedTasks = (pendingAction.tasks || []).filter(t => t.selected !== false);
+                            const confirmedEvents = (pendingAction.events || []).filter(e => e.selected !== false);
+                            const confirmedWishlist = (pendingAction.wishlist_items || []).filter(w => w.selected !== false);
+                            handleConfirmActions(confirmedTasks, confirmedEvents, confirmedWishlist);
+                          }}
+                        >
+                          Voeg geselecteerde toe
+                        </Button>
                       </div>
-                    ) : null}
+                    </div>
                   </div>
                 ) : null}
               </motion.div>

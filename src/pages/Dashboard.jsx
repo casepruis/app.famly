@@ -1,4 +1,55 @@
-import React, { useState, useEffect } from "react";
+// Helper to trigger a push notification via the service worker
+async function triggerPushNotification({ title, body, url }) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      const reg = await navigator.serviceWorker?.ready;
+      if (reg?.showNotification) {
+        await reg.showNotification(title, {
+          body,
+          icon: '/icons/icon-192.png',
+          badge: '/icons/badge-72.png',
+          data: { url: url || '/' },
+        });
+      } else {
+        new Notification(title, { body, icon: '/icons/icon-192.png' });
+      }
+    } catch (e) {
+      // fallback: ignore
+    }
+  }
+}
+import React, { useState, useEffect, useRef } from "react";
+// --- WebSocket for real-time event/task updates ---
+const useFamlyWebSocket = (reload) => {
+  const wsRef = useRef(null);
+  useEffect(() => {
+    if (!reload) return;
+    let ws;
+    try {
+      const token = localStorage.getItem("famlyai_token");
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const host = window.location.host;
+      const WS_BASE = (import.meta)?.env?.VITE_WS_BASE || `${protocol}//${host}`;
+      ws = new window.WebSocket(`${WS_BASE}/ws?token=${encodeURIComponent(token)}`);
+      wsRef.current = ws;
+      ws.onmessage = (msg) => {
+        try {
+          const data = JSON.parse(msg.data);
+          if (data && (
+            data.type === 'schedule_event_created' ||
+            data.type === 'schedule_event_updated' ||
+            data.type === 'schedule_event_deleted' ||
+            data.type === 'task_created' ||
+            data.type === 'task_updated' ||
+            data.type === 'task_deleted')) {
+            reload();
+          }
+        } catch {}
+      };
+    } catch {}
+    return () => { try { ws && ws.close(); } catch {} };
+  }, [reload]);
+};
 import { useFamilyData } from "@/hooks/FamilyDataContext";
 import { motion } from "framer-motion";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -28,6 +79,7 @@ const tourSteps = (t) => [
 export default function Dashboard() {
   // All hooks must be called before any early returns
   const { user, family, members: familyMembers, events, tasks, isLoading, error, reload } = useFamilyData();
+  useFamlyWebSocket(reload);
   const [hasError, setHasError] = useState(false);
   const [runTour, setRunTour] = useState(false);
   const [editEvent, setEditEvent] = useState(null);
@@ -187,7 +239,7 @@ export default function Dashboard() {
     try {
       if (editEvent && editEvent.id) {
         await ScheduleEvent.update(editEvent.id, eventData);
-        reload();
+  // reload();
         toast({ title: t('eventUpdated'), description: eventData.title, variant: 'success', duration: 5000 });
       } else {
         // Ensure family_id is included for new events
@@ -195,8 +247,22 @@ export default function Dashboard() {
         console.log('[FamlyAI] Creating event with payload:', newEvent);
         const created = await ScheduleEvent.create(newEvent);
         console.log('[FamlyAI] ScheduleEvent.create response:', created);
-        reload();
+  // reload();
         toast({ title: t('eventCreated'), description: eventData.title, variant: 'success', duration: 5000 });
+        // --- Actionable notification for event assignees (toast + push) ---
+        const assignees = Array.isArray(eventData.family_member_ids) ? eventData.family_member_ids : [];
+        if (user && assignees.includes(user.id)) {
+          let assignerName = user.name || "Someone";
+          const notifTitle = t("event.assignedToYouTitle") || "New Event Scheduled";
+          const notifBody = `${assignerName} scheduled an event for you: ${eventData.title}`;
+          toast({ title: notifTitle, description: notifBody, duration: 5000 });
+          // Push notification
+          triggerPushNotification({
+            title: notifTitle,
+            body: notifBody,
+            url: window.location.origin + createPageUrl ? createPageUrl('Dashboard') : '/dashboard',
+          });
+        }
       }
       handleDialogClose();
     } catch (error) {
@@ -208,7 +274,7 @@ export default function Dashboard() {
     if (!window.confirm(t('confirmDeleteEvent') || 'Delete this event?')) return;
     try {
       await ScheduleEvent.delete(event.id);
-      reload();
+  // reload();
       toast({ title: t('eventDeleted'), description: event.title, variant: 'success', duration: 5000 });
       handleDialogClose();
     } catch (error) {
@@ -222,7 +288,32 @@ export default function Dashboard() {
       <EventDialog
         isOpen={!!editEvent || !!selectedTimeSlot}
         onClose={handleDialogClose}
-        onSave={handleProcessSave}
+        onSave={async (eventData, _ignored, editType = "single") => {
+          try {
+            // Always ensure family_id is set for new events
+            let newEventData = { ...eventData };
+            if (!(editEvent && editEvent.id)) {
+              if (!newEventData.family_id) {
+                if (family && family.id) {
+                  newEventData.family_id = family.id;
+                } else if (user && user.family_id) {
+                  newEventData.family_id = user.family_id;
+                }
+              }
+            }
+            if (editEvent && editEvent.id) {
+              await ScheduleEvent.update(editEvent.id, newEventData);
+              toast({ title: t('eventUpdated'), description: newEventData.title, variant: 'success', duration: 5000 });
+            } else {
+              await ScheduleEvent.create(newEventData);
+              toast({ title: t('eventCreated'), description: newEventData.title, variant: 'success', duration: 5000 });
+            }
+            // if (reload) await reload();
+            handleDialogClose();
+          } catch (error) {
+            toast({ title: t('errorSavingEvent'), description: eventData.title, variant: 'destructive', duration: 5000 });
+          }
+        }}
         onDelete={handleDialogDelete}
         familyMembers={familyMembers}
         initialData={editEvent}
@@ -246,14 +337,14 @@ export default function Dashboard() {
           <UpcomingTasks tasks={upcomingTasks} familyMembers={familyMembers} />
         </motion.div>
       </div>
-      <div className="grid lg:grid-cols-2 gap-6">
+      {/* <div className="grid lg:grid-cols-2 gap-6">
         <motion.div id="ai-insights-card" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.5, delay: 0.4 }}>
           <AIInsights tasks={tasks} events={events} familyMembers={familyMembers} />
         </motion.div>
         <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.5, delay: 0.5 }}>
           <FunFactCard />
         </motion.div>
-      </div>
+      </div> */}
     </div>
   );
 }

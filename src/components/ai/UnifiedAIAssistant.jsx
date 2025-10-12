@@ -127,85 +127,431 @@ function resolveTargetMember(messageText, familyMembers, currentUserMember) {
 }
 
 
+
 export default function UnifiedAIAssistant({ conversationContext, allFamilyMembers = [], user, onUpdate }) {
   const { t, currentLanguage } = useLanguage();
   const [inputValue, setInputValue] = useState('');
-  const [conversation, setConversation] = useState([]);
+  // Persist conversation in localStorage
+  const STORAGE_KEY = 'famlyai_ai_conversation';
+  const [conversation, setConversation] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [isProcessing, setIsProcessing] = useState(false);
   const [pendingAction, setPendingAction] = useState(null); // {action_type, action_payload}
   const conversationEndRef = useRef(null);
 
+  // Save conversation to localStorage on change
   useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(conversation));
+    } catch {}
     conversationEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [conversation, pendingAction]);
+
+  // Clear chat handler
+  const handleClearChat = () => {
+    setConversation([]);
+    setPendingAction(null);
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  };
 
   const executeAction = async (action) => {
     try {
       let successMessage = '';
-      if (action.action_type === 'create_task') {
-        await Task.create(action.action_payload);
-        successMessage = t('taskCreatedConfirmation', { title: action.action_payload.title })
-          || `Okay, I've created the task: "${action.action_payload.title}".`;
+      // Dynamically import Task and WishlistItem for robust code splitting
+      const entities = await import('@/api/entities');
+      const Task = entities.Task;
+      const WishlistItem = entities.WishlistItem;
+      const ScheduleEvent = entities.ScheduleEvent;
+
+      // If both tasks and wishlist items are present, confirm both
+      if (action.action_type === 'create_task' || action.action_type === 'create_multiple_tasks' || action.action_type === 'add_to_wishlist' || action.action_type === 'add_multiple_to_wishlist') {
+        let taskTitles = [];
+        let wishlistNames = [];
+        // Handle single/multiple tasks
+        if (action.action_type === 'create_task' && action.action_payload) {
+          await Task.create(action.action_payload);
+          taskTitles.push(action.action_payload.title);
+        }
+        if (action.action_type === 'create_multiple_tasks' && Array.isArray(action.action_payload?.tasks)) {
+          for (const taskPayload of action.action_payload.tasks) {
+            await Task.create(taskPayload);
+            taskTitles.push(taskPayload.title);
+          }
+        }
+        // Handle single/multiple wishlist items
+        if (action.action_type === 'add_to_wishlist' && action.action_payload) {
+          const payload = { ...action.action_payload };
+          if (!payload.family_id && user?.family_id) payload.family_id = user.family_id;
+          const created = await WishlistItem.create(payload);
+          wishlistNames.push(created?.name || payload.name || 'item');
+        }
+        if (action.action_type === 'add_multiple_to_wishlist' && Array.isArray(action.action_payload?.items)) {
+          for (const it of action.action_payload.items) {
+            const payload = { ...it };
+            if (!payload.family_id && user?.family_id) payload.family_id = user.family_id;
+            const created = await WishlistItem.create(payload);
+            wishlistNames.push(created?.name || payload.name || 'item');
+          }
+        }
+        // Compose success message for both
+        if (taskTitles.length && wishlistNames.length) {
+          successMessage = `${t('multipleTasksCreatedConfirmation', { count: taskTitles.length, titles: taskTitles.join(', ') }) || `Created tasks: ${taskTitles.join(', ')}`}\n${t('multipleWishlistAddedConfirmation', { count: wishlistNames.length, titles: wishlistNames.join(', ') }) || `Added wishlist items: ${wishlistNames.join(', ')}`}`;
+        } else if (taskTitles.length) {
+          successMessage = t('multipleTasksCreatedConfirmation', { count: taskTitles.length, titles: taskTitles.join(', ') }) || `Created tasks: ${taskTitles.join(', ')}`;
+        } else if (wishlistNames.length) {
+          successMessage = t('multipleWishlistAddedConfirmation', { count: wishlistNames.length, titles: wishlistNames.join(', ') }) || `Added wishlist items: ${wishlistNames.join(', ')}`;
+        }
       } else if (action.action_type === 'create_event') {
         await ScheduleEvent.create(action.action_payload);
         successMessage = t('eventCreatedConfirmation', { title: action.action_payload.title })
           || `Okay, I've scheduled the event: "${action.action_payload.title}".`;
-      } else if (action.action_type === 'add_to_wishlist') {
-        const payload = { ...action.action_payload };
-        if (!payload.family_id && user?.family_id) payload.family_id = user.family_id;
-        const created = await WishlistItem.create(payload);
-        const name = created?.name || payload.name || 'item';
-        successMessage = t?.('wishlistAddedConfirmation', { name }) || `Okay, I've added "${name}" to the wishlist.`;
-
-      } else if (action.action_type === 'add_multiple_to_wishlist') {
-        const items = Array.isArray(action.action_payload?.items) ? action.action_payload.items : [];
-        const names = [];
-        for (const it of items) {
-          const payload = { ...it };
-          if (!payload.family_id && user?.family_id) payload.family_id = user.family_id;
-          const created = await WishlistItem.create(payload);
-          names.push(created?.name || payload.name || 'item');
-        }
-        successMessage =
-          t?.('multipleWishlistAddedConfirmation', { count: names.length, titles: names.join(', ') }) ||
-          `Okay, I've added ${names.length} wishlist items: ${names.join(', ')}.`;
-        } else if (
-          action.action_type === 'create_multiple_events' ||
-          action.action_type === 'propose_multiple_events' ||
-          action.action_type === 'propose_multiple_events_from_chat'
-        ) {
-          const titles = [];
-          for (const eventPayload of action.action_payload.events) {
-            await ScheduleEvent.create(eventPayload);
-            titles.push(eventPayload.title);
-          }
-          successMessage =
-            t('multipleEventsCreatedConfirmation', { count: titles.length, titles: titles.join(', ') }) ||
-            `Okay, I've scheduled ${titles.length} events: ${titles.join(', ')}.`;
-      } else if (action.action_type === 'create_multiple_tasks') {
+      } else if (
+        action.action_type === 'create_multiple_events' ||
+        action.action_type === 'propose_multiple_events' ||
+        action.action_type === 'propose_multiple_events_from_chat'
+      ) {
         const titles = [];
-        for (const taskPayload of action.action_payload.tasks) {
-          await Task.create(taskPayload);
-          titles.push(taskPayload.title);
+        for (const eventPayload of action.action_payload.events) {
+          await ScheduleEvent.create(eventPayload);
+          titles.push(eventPayload.title);
         }
         successMessage =
-          t('multipleTasksCreatedConfirmation', { count: titles.length, titles: titles.join(', ') }) ||
-          `Okay, I've created ${titles.length} tasks: ${titles.join(', ')}.`;
-      } else if (action.action_type === 'add_multiple_to_wishlist') {
-        const names = [];
-        for (const w of action.action_payload.items) {
-          await WishlistItem.create(w);
-          names.push(w.name);
-        }
-        successMessage = t('multipleWishlistAddedConfirmation', { count: names.length, titles: names.join(', ') })
-          || `Okay, I've added ${names.length} wishlist items: ${names.join(', ')}.`;
+          t('multipleEventsCreatedConfirmation', { count: titles.length, titles: titles.join(', ') }) ||
+          `Okay, I've scheduled ${titles.length} events: ${titles.join(', ')}.`;
       } else if (action.action_type === 'update_task_status') {
         const { id, status } = action.action_payload;
         await Task.update(id, { status });
         successMessage = t('taskUpdatedConfirmation', { status }) || `Task updated to ${status}.`;
+      } else if (action.action_type === 'convert_event_to_task') {
+        const { event_id } = action.action_payload;
+        await ScheduleEvent.toTask(event_id);
+        successMessage = t('eventConvertedToTask') || 'Event converted to task!';
+      } else if (action.action_type === 'convert_task_to_event') {
+        const { task_id } = action.action_payload;
+        await Task.toEvent(task_id);
+        successMessage = t('taskConvertedToEvent') || 'Task converted to event!';
       } else {
         return;
       }
+  // Add conversion intent detection to handleSend
+  // If user says e.g. "convert this event to a task" or "make this task an event", trigger conversion
+  const handleSend = async (messageText) => {
+    if (isProcessing || !messageText?.trim()) return;
+
+    // Simple intent detection for conversion
+    const lower = messageText.toLowerCase();
+    if (lower.includes('convert') && lower.includes('event') && lower.includes('task')) {
+      // Try to get last event from context
+      const lastEvent = Array.isArray(events) && events.length > 0 ? events[events.length - 1] : null;
+      if (lastEvent && lastEvent.id) {
+        setConversation(prev => [...prev, { role: 'user', content: messageText }]);
+        setIsProcessing(true);
+        try {
+          await ScheduleEvent.toTask(lastEvent.id);
+          setConversation(prev => [...prev, { role: 'assistant', content: t('eventConvertedToTask') || 'Event converted to task!' }]);
+        } catch (e) {
+          setConversation(prev => [...prev, { role: 'assistant', content: t('eventConvertToTaskFailed') || 'Failed to convert event to task.' }]);
+        }
+        setIsProcessing(false);
+        setInputValue('');
+        return;
+      }
+    }
+    if (lower.includes('convert') && lower.includes('task') && lower.includes('event')) {
+      // Try to get last task from context
+      const lastTask = Array.isArray(tasks) && tasks.length > 0 ? tasks[tasks.length - 1] : null;
+      if (lastTask && lastTask.id) {
+        setConversation(prev => [...prev, { role: 'user', content: messageText }]);
+        setIsProcessing(true);
+        try {
+          await Task.toEvent(lastTask.id);
+          setConversation(prev => [...prev, { role: 'assistant', content: t('taskConvertedToEvent') || 'Task converted to event!' }]);
+        } catch (e) {
+          setConversation(prev => [...prev, { role: 'assistant', content: t('taskConvertToEventFailed') || 'Failed to convert task to event.' }]);
+        }
+        setIsProcessing(false);
+        setInputValue('');
+        return;
+      }
+    }
+
+    // ...existing handleSend logic...
+    setPendingAction(null);
+    const userMsg = { role: 'user', content: messageText };
+    setConversation(prev => [...prev, userMsg]);
+    setInputValue('');
+    setIsProcessing(true);
+
+    try {
+      const familyMembers = Array.isArray(allFamilyMembers) ? allFamilyMembers : [];
+      const currentUserMember = user ? familyMembers.find(m => m.user_id === user.id) : null;
+      const familyMemberInfo = familyMembers.map(m => ({ id: m.id, name: m.name }));
+      const familyId = user?.family_id || null;
+
+      if (!familyId) {
+        setConversation(prev => [
+          ...prev,
+          { role: 'assistant', content: t('noFamilyIdError') || "I can't do that without a family context. Please set up or join a family first." }
+        ]);
+        setIsProcessing(false);
+        return;
+      }
+
+
+      // Keep a longer conversation history (last 30 messages)
+      const history = [...conversation, userMsg]
+        .slice(-30)
+        .map(msg => ({ role: msg.role, content: msg.content }));
+      const contextString = history
+        .map(msg => `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
+        .join('\n');
+
+      const prompt = `You are famly.ai, a helpful assistant.
+TODAY_IS: ${new Date().toISOString()}
+USER_LANGUAGE: ${currentLanguage}
+
+When the user says "I"/"me"/"my", they refer to:
+- name: ${currentUserMember?.name || 'family member'}
+- id: ${currentUserMember?.id || 'unknown'}
+
+FAMILY:
+- id: ${familyId}
+- members (usable IDs): ${JSON.stringify(familyMemberInfo)}
+
+ALLOWED EVENT CATEGORIES (pick ONE; if none fits, use "other" and do NOT invent new labels):
+${JSON.stringify(EVENT_CATEGORIES)}
+
+RECENT CONVERSATION:
+${contextString}
+
+Analyze the user's last message: "${messageText}"
+
+Return JSON ONLY (no code fences, no prose). All human-readable strings MUST be in ${currentLanguage}.
+Use 24h time and ISO without timezone (YYYY-MM-DDTHH:MM:SS).
+
+Choose EXACTLY one shape:
+
+1) Multiple activities in one message:
+{
+  "action_type": "propose_multiple_events_from_chat",
+  "confirmation_message": "…",
+  "action_payload": {
+    "events": [
+      { "title": "…", "start_time": "YYYY-MM-DDTHH:MM:SS", "end_time": "YYYY-MM-DDTHH:MM:SS", "family_member_ids": ["<member_id>"], "family_id": "${familyId}", "location": "…", "category": "<one of ${EVENT_CATEGORIES.join(', ')} or 'other'>" }
+    ]
+  }
+}
+
+2) Vacation/date block:
+{
+  "action_type": "propose_multiple_events",
+  "confirmation_message": "…",
+  "action_payload": { "events": [ { "title": "…", "start_time": "…", "end_time": "…", "family_id": "${familyId}", "category": "holiday", "family_member_ids": [] } ] }
+}
+
+3) Single task:
+{
+  "action_type": "propose_task",
+  "confirmation_message": "…",
+  "action_payload": { "title": "…", "description": "…", "assigned_to": ["<member_id_if_user>"], "due_date": "YYYY-MM-DDTHH:MM:SS", "family_id": "${familyId}", "status": "todo" }
+}
+
+4) Single event:
+{
+  "action_type": "propose_event",
+  "confirmation_message": "…",
+  "action_payload": { "title": "…", "start_time": "YYYY-MM-DDTHH:MM:SS", "end_time": "YYYY-MM-DDTHH:MM:SS", "family_member_ids": ["<member_id>"], "family_id": "${familyId}", "location": "…", "category": "<one of ${EVENT_CATEGORIES.join(', ')} or 'other'>" }
+}
+
+5) Add wishlist item:
+{
+  "action_type": "propose_wishlist_item",
+  "confirmation_message": "…",
+  "action_payload": { "name": "…", "url": "…", "family_member_id": "<member_id>" }
+}
+
+6) Add MULTIPLE wishlist items:
+{
+  "action_type": "propose_multiple_wishlist_items",
+  "confirmation_message": "…",
+  "action_payload": { "items": [ { "name": "…", "url": "…", "family_member_id": "<member_id>" } ] }
+}
+
+7) Show wishlist:
+{ "action_type": "show_wishlist", "confirmation_message": "…", "action_payload": {} }
+
+8) Show upcoming events:
+{ "action_type": "show_upcoming_events", "confirmation_message": "…", "action_payload": { "limit": 5 } }
+
+9) Show tasks (optionally by status):
+{ "action_type": "show_tasks", "confirmation_message": "…", "action_payload": { "status": "todo" } }
+
+10) Mark a task done/in_progress:
+{ "action_type": "update_task_status", "confirmation_message": "…", "action_payload": { "id": "<task_id>", "status": "done" } }
+
+11) Need clarification:
+{ "action_type": "clarify", "clarification_question": "…" }
+
+12) General chat:
+{ "action_type": "chat", "response": "…" }`;
+
+      const response = await InvokeLLM({
+        prompt,
+        system: `You are famly.ai. Respond ONLY with JSON. All human-readable strings MUST be written in ${currentLanguage}.`,
+        response_json_schema: {
+          type: "object",
+          properties: {
+            action_type: {
+              type: "string",
+              enum: [
+                "propose_task",
+                "propose_event",
+                "propose_multiple_events",
+                "propose_multiple_events_from_chat",
+                "propose_wishlist_item",
+                "propose_multiple_wishlist_items",
+                "show_wishlist",
+                "show_upcoming_events",
+                "show_tasks",
+                "update_task_status",
+                "clarify",
+                "chat",
+                "convert_event_to_task",
+                "convert_task_to_event"
+              ]
+            },
+            confirmation_message: { type: "string" },
+            action_payload: {
+              type: "object",
+              properties: {
+                // task
+                title: { type: "string" },
+                description: { type: "string" },
+                assigned_to: { type: "array", items: { type: "string" } },
+                due_date: { type: "string" },
+                family_id: { type: "string" },
+                status: { type: "string" },
+                id: { type: "string" },
+                // single event
+                start_time: { type: "string" },
+                end_time: { type: "string" },
+                family_member_ids: { type: "array", items: { type: "string" } },
+                location: { type: "string" },
+                category: { type: "string", enum: EVENT_CATEGORIES },
+                // multiple events
+                events: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      title: { type: "string" },
+                      start_time: { type: "string" },
+                      end_time: { type: "string" },
+                      family_member_ids: { type: "array", items: { type: "string" } },
+                      family_id: { type: "string" },
+                      location: { type: "string" },
+                      category: { type: "string", enum: EVENT_CATEGORIES }
+                    },
+                    required: ["title", "start_time", "end_time", "family_id"]
+                  }
+                },
+                // wishlist
+                name: { type: "string" },
+                url: { type: "string" },
+                family_member_id: { type: "string" },
+                items: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      url: { type: "string" },
+                      family_member_id: { type: "string" }
+                    },
+                    required: ["name"]
+                  }
+                },
+                // listing helpers
+                limit: { type: "number" },
+                // conversion
+                event_id: { type: "string" },
+                task_id: { type: "string" }
+              }
+            },
+            clarification_question: { type: "string" },
+            response: { type: "string" }
+          },
+          required: ["action_type"]
+        },
+        strict: true,
+      });
+
+      const data = response?.data || {};
+      const type = data.action_type;
+      let aiResponse = null;
+      let nextPending = null;
+      let hasAction = false;
+
+      const autoApply = true; // we auto-apply WHEN payload is complete
+
+      switch (type) {
+        case 'convert_event_to_task': {
+          const payload = data.action_payload || {};
+          if (payload.event_id) {
+            await executeAction({ action_type: 'convert_event_to_task', action_payload: payload });
+            aiResponse = null;
+            hasAction = false;
+            nextPending = null;
+          }
+          break;
+        }
+        case 'convert_task_to_event': {
+          const payload = data.action_payload || {};
+          if (payload.task_id) {
+            await executeAction({ action_type: 'convert_task_to_event', action_payload: payload });
+            aiResponse = null;
+            hasAction = false;
+            nextPending = null;
+          }
+          break;
+        }
+        // ...existing switch cases...
+        case 'propose_task': {
+          const payload = data.action_payload || {};
+          const complete = isCompleteTask(payload);
+          if (autoApply && complete) {
+            await executeAction({ action_type: 'create_task', action_payload: payload });
+            aiResponse = null;
+            hasAction = false;
+            nextPending = null;
+          } else {
+            aiResponse = data.confirmation_message;
+            nextPending = { action_type: 'create_task', action_payload: payload };
+            hasAction = true;
+          }
+          break;
+        }
+        // ...rest of switch...
+      }
+
+      if (aiResponse) {
+        setConversation(prev => [...prev, { role: 'assistant', content: aiResponse, hasAction }]);
+      }
+      setPendingAction(nextPending);
+    } catch (err) {
+      setConversation(prev => [
+        ...prev,
+        { role: 'assistant', content: t('aiError') || "I couldn't complete that action. Please try again." }
+      ]);
+    }
+    setIsProcessing(false);
+  };
 
       setConversation(prev => [...prev, { role: 'assistant', content: successMessage }]);
       if (onUpdate) onUpdate();
@@ -655,9 +1001,15 @@ Choose EXACTLY one shape:
 
   /** ——— Review widgets (tabular-ish) ——— */
 
-  // Editable row for one event
-  const EventRow = ({ event, index }) => (
-    <div className="p-3 bg-gray-50 rounded-lg space-y-2">
+  // Editable row for one event, with checkbox
+  const EventRow = ({ event, index, onSelect, selected }) => (
+    <div className="p-3 bg-gray-50 rounded-lg space-y-2 flex items-start gap-2">
+      <input
+        type="checkbox"
+        className="mt-2"
+        checked={selected}
+        onChange={e => onSelect(e.target.checked)}
+      />
       <Input
         value={event.title || ''}
         onChange={(e) =>
@@ -674,7 +1026,7 @@ Choose EXACTLY one shape:
         className="text-sm"
         placeholder={t('title') || 'Title'}
       />
-      <div className="grid grid-cols-2 gap-2">
+  <div className="grid grid-cols-2 gap-2">
       <Input
         type="datetime-local"
         value={toLocalInputValue(event.start_time)}
@@ -711,7 +1063,7 @@ Choose EXACTLY one shape:
 
       </div>
 
-      <div className="text-xs">{t('assignToMembers') || 'Assign to members'}</div>
+  <div className="text-xs">{t('assignToMembers') || 'Assign to members'}</div>
       <div className="flex flex-wrap gap-2">
         <Select
           value="" // use menu to toggle; showing selected below
@@ -751,9 +1103,15 @@ Choose EXACTLY one shape:
     </div>
   );
 
-  // Editable row for one task
-  const TaskRow = ({ task, index }) => (
-    <div className="p-3 bg-gray-50 rounded-lg space-y-2">
+  // Editable row for one task, with checkbox
+  const TaskRow = ({ task, index, onSelect, selected }) => (
+    <div className="p-3 bg-gray-50 rounded-lg space-y-2 flex items-start gap-2">
+      <input
+        type="checkbox"
+        className="mt-2"
+        checked={selected}
+        onChange={e => onSelect(e.target.checked)}
+      />
       <Input
         value={task.title || ''}
         onChange={(e) =>
@@ -868,9 +1226,15 @@ Choose EXACTLY one shape:
     </div>
   );
 
-  // Editable row for one wishlist item (name + url + owner)
-  const WishlistRow = ({ item, index }) => (
-  <div className="p-3 bg-gray-50 rounded-lg space-y-2">
+  // Editable row for one wishlist item (name + url + owner), with checkbox
+  const WishlistRow = ({ item, index, onSelect, selected }) => (
+  <div className="p-3 bg-gray-50 rounded-lg space-y-2 flex items-start gap-2">
+    <input
+      type="checkbox"
+      className="mt-2"
+      checked={selected}
+      onChange={e => onSelect(e.target.checked)}
+    />
     <Input
       value={item.name || ''}
       onChange={(e) =>
@@ -980,88 +1344,107 @@ Choose EXACTLY one shape:
                   <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                 </div>
 
-                {/* Tabular review for EVENTS */}
-                {msg.hasAction && index === conversation.length - 1 &&
-                  pendingAction &&
-                  (pendingAction.action_type === 'create_multiple_events' ||
-                  pendingAction.action_type === 'propose_multiple_events' ||
-                  pendingAction.action_type === 'propose_multiple_events_from_chat' ||
-                  pendingAction.action_type === 'create_event') && (
+                  {/* Unified review for all types, with checkboxes and single confirm */}
+                  {msg.hasAction && index === conversation.length - 1 && pendingAction && (
                     <motion.div
                       initial={{ opacity: 0, y: 5 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="mt-3 p-3 bg-white border rounded-lg max-h-96 overflow-y-auto w-full max-w-2xl space-y-3"
                     >
-                      <h4 className="font-semibold text-sm mb-1">
-                        {t('proposedEvents') || 'Proposed events:'}
+                      <h4 className="font-semibold text-sm mb-2">
+                        {t('reviewAndConfirm') || 'Review and confirm your selections:'}
                       </h4>
-                      {Array.isArray(pendingAction.action_payload?.events)
-                        ? pendingAction.action_payload.events.map((ev, i) => (
-                            <EventRow key={i} event={ev} index={i} />
-                          ))
-                        : <EventRow event={pendingAction.action_payload} index={0} />
-                      }
+                      {/* Events */}
+                      {Array.isArray(pendingAction.action_payload?.events) && pendingAction.action_payload.events.length > 0 && (
+                        <div>
+                          <div className="font-semibold text-xs text-emerald-800 mb-1">{t('events') || 'Events'}</div>
+                          {pendingAction.action_payload.events.map((ev, i) => (
+                            <EventRow
+                              key={i}
+                              event={ev}
+                              index={i}
+                              selected={ev.selected !== false}
+                              onSelect={checked => {
+                                setPendingAction(prev => ({
+                                  ...prev,
+                                  action_payload: {
+                                    ...prev.action_payload,
+                                    events: prev.action_payload.events.map((e, idx) => idx === i ? { ...e, selected: checked } : e)
+                                  }
+                                }));
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                      {/* Tasks */}
+                      {Array.isArray(pendingAction.action_payload?.tasks) && pendingAction.action_payload.tasks.length > 0 && (
+                        <div>
+                          <div className="font-semibold text-xs text-green-800 mb-1">{t('tasks') || 'Tasks'}</div>
+                          {pendingAction.action_payload.tasks.map((tk, i) => (
+                            <TaskRow
+                              key={i}
+                              task={tk}
+                              index={i}
+                              selected={tk.selected !== false}
+                              onSelect={checked => {
+                                setPendingAction(prev => ({
+                                  ...prev,
+                                  action_payload: {
+                                    ...prev.action_payload,
+                                    tasks: prev.action_payload.tasks.map((t, idx) => idx === i ? { ...t, selected: checked } : t)
+                                  }
+                                }));
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                      {/* Wishlist */}
+                      {Array.isArray(pendingAction.action_payload?.items) && pendingAction.action_payload.items.length > 0 && (
+                        <div>
+                          <div className="font-semibold text-xs text-purple-800 mb-1">{t('wishlist') || 'Wishlist'}</div>
+                          {pendingAction.action_payload.items.map((it, i) => (
+                            <WishlistRow
+                              key={i}
+                              item={it}
+                              index={i}
+                              selected={it.selected !== false}
+                              onSelect={checked => {
+                                setPendingAction(prev => ({
+                                  ...prev,
+                                  action_payload: {
+                                    ...prev.action_payload,
+                                    items: prev.action_payload.items.map((w, idx) => idx === i ? { ...w, selected: checked } : w)
+                                  }
+                                }));
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex justify-end gap-2 pt-4 border-t border-blue-100 mt-4">
+                        <Button onClick={handleCancelAction} size="sm" variant="outline">
+                          <X className="w-4 h-4 mr-1" /> {t('cancel') || 'Cancel'}
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            // Only confirm selected items
+                            const filtered = { ...pendingAction.action_payload };
+                            if (filtered.events) filtered.events = filtered.events.filter(e => e.selected !== false);
+                            if (filtered.tasks) filtered.tasks = filtered.tasks.filter(t => t.selected !== false);
+                            if (filtered.items) filtered.items = filtered.items.filter(w => w.selected !== false);
+                            executeAction({ ...pendingAction, action_payload: filtered });
+                            setPendingAction(null);
+                          }}
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700"
+                        >
+                          <Check className="w-4 h-4 mr-1" /> {t('yesSoundsGood') || 'Yes, sounds good'}
+                        </Button>
+                      </div>
                     </motion.div>
-                )}
-
-                {/* Tabular review for TASKS (single or multiple) */}
-                {msg.hasAction && index === conversation.length - 1 &&
-                  pendingAction &&
-                  (pendingAction.action_type === 'create_task' ||
-                   pendingAction.action_type === 'create_multiple_tasks') && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="mt-3 p-3 bg-white border rounded-lg max-h-96 overflow-y-auto w-full max-w-2xl space-y-3"
-                    >
-                      <h4 className="font-semibold text-sm mb-1">
-                        {t('proposedTasks') || 'Proposed tasks:'}
-                      </h4>
-                      {Array.isArray(pendingAction.action_payload?.tasks)
-                        ? pendingAction.action_payload.tasks.map((tk, i) => (
-                            <TaskRow key={i} task={tk} index={i} />
-                          ))
-                        : <TaskRow task={pendingAction.action_payload} index={0} />
-                      }
-                    </motion.div>
-                )}
-
-                {/* Tabular review for WISHLIST (single or multiple) */}
-                {msg.hasAction && index === conversation.length - 1 &&
-                  pendingAction &&
-                  (pendingAction.action_type === 'add_to_wishlist' ||
-                   pendingAction.action_type === 'add_multiple_to_wishlist') && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="mt-3 p-3 bg-white border rounded-lg max-h-96 overflow-y-auto w-full max-w-2xl space-y-3"
-                    >
-                      <h4 className="font-semibold text-sm mb-1">
-                        {t('proposedWishlist') || 'Proposed wishlist items:'}
-                      </h4>
-                      {Array.isArray(pendingAction.action_payload?.items)
-                        ? pendingAction.action_payload.items.map((it, i) => (
-                            <WishlistRow key={i} item={it} index={i} />
-                          ))
-                        : <WishlistRow item={pendingAction.action_payload} index={0} />
-                      }
-                    </motion.div>
-                )}
-
-                {msg.hasAction && index === conversation.length - 1 && pendingAction && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="flex gap-2 mt-2"
-                  >
-                    <Button onClick={handleConfirmAction} size="sm" className="bg-green-600 hover:bg-green-700">
-                      <Check className="w-4 h-4 mr-1" /> {t('yesSoundsGood') || 'Yes, sounds good'}
-                    </Button>
-                    <Button onClick={handleCancelAction} size="sm" variant="outline">
-                      <X className="w-4 h-4 mr-1" /> {t('cancel') || 'Cancel'}
-                    </Button>
-                  </motion.div>
-                )}
+                  )}
               </div>
             </motion.div>
           ))}
@@ -1086,8 +1469,20 @@ Choose EXACTLY one shape:
         )}
       </div>
 
+      {/* Clear chat button at top right */}
+      <div className="flex justify-end p-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleClearChat}
+          disabled={isProcessing || !!pendingAction}
+          title={t('clearChat') || 'Clear chat'}
+        >
+          {t('clearChat') || 'Clear chat'}
+        </Button>
+      </div>
       <div className="border-t p-2 sm:p-4 bg-white flex-shrink-0">
-        <div className="relative">
+        <div className="relative flex items-center gap-2">
           <Textarea
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}

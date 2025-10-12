@@ -63,11 +63,9 @@ export default function ChatPage() {
     }, [activeConversationId, navigate, toast]);
     
     const handleComingSoon = (feature) => {
-    toast({ duration: 5000,
-            title: `${feature} ${t('comingSoon') || 'Coming Soon'}`,
+    toast({ title: `${feature} ${t('comingSoon') || 'Coming Soon'}`,
             description: t('featureInDevelopment') || 'This feature is currently in development.',
-            duration: 5000 
-        });
+            duration: 5000 });
     };
     
     const handleClearChat = async () => {

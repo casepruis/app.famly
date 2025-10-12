@@ -1,5 +1,53 @@
+// Helper to trigger a push notification via the service worker
+async function triggerPushNotification({ title, body, url }) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      const reg = await navigator.serviceWorker?.ready;
+      if (reg?.showNotification) {
+        await reg.showNotification(title, {
+          body,
+          icon: '/icons/icon-192.png',
+          badge: '/icons/badge-72.png',
+          data: { url: url || '/' },
+        });
+      } else {
+        new Notification(title, { body, icon: '/icons/icon-192.png' });
+      }
+    } catch (e) {
+      // fallback: ignore
+    }
+  }
+}
 // src/pages/Schedule.jsx
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+// --- WebSocket for real-time event updates ---
+const useEventWebSocket = (reload) => {
+  const wsRef = useRef(null);
+  useEffect(() => {
+    if (!reload) return;
+    let ws;
+    try {
+      const token = localStorage.getItem("famlyai_token");
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const host = window.location.host;
+      const WS_BASE = (import.meta)?.env?.VITE_WS_BASE || `${protocol}//${host}`;
+      ws = new window.WebSocket(`${WS_BASE}/ws?token=${encodeURIComponent(token)}`);
+      wsRef.current = ws;
+      ws.onmessage = (msg) => {
+        try {
+          const data = JSON.parse(msg.data);
+          if (data && (
+            data.type === 'schedule_event_created' ||
+            data.type === 'schedule_event_updated' ||
+            data.type === 'schedule_event_deleted')) {
+            reload();
+          }
+        } catch {}
+      };
+    } catch {}
+    return () => { try { ws && ws.close(); } catch {} };
+  }, [reload]);
+};
 import { ScheduleEvent, FamilyMember, User, Task } from "@/api/entities";
 import {
   addDays, addWeeks, addMonths, addYears, getHours,
@@ -99,6 +147,7 @@ const generateRecurringEvents = (baseEvent) => {
 
 export default function Schedule() {
   const { user, family, members: familyMembers, events, isLoading, error, reload } = useFamilyData();
+  useEventWebSocket(reload);
   const [selectedMembers, setSelectedMembers] = useState([]);
   const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
@@ -132,12 +181,12 @@ export default function Schedule() {
     setDashboardFavorite(newFavorite);
     try {
       await User.updateMyUserData({ dashboard_favorite_view: newFavorite });
-  toast({
+      toast({
         title: newFavorite ? t("dashboardFavoriteSet") || "Dashboard favorite set" : t("dashboardFavoriteRemoved") || "Dashboard favorite removed",
         description: newFavorite
           ? `${calendarView === "weekly" ? t("weekly") : t("byMember")} view will be used on dashboard`
           : t("dashboardUsesGeneralPreference") || "Dashboard will use your general preference",
-        duration: 5000 
+        duration: 5000
       });
     } catch (error) {
       console.error("Failed to save dashboard favorite:", error);
@@ -318,23 +367,38 @@ Category: "${eventData.category || ""}"`,
           await Task.bulkCreate(tasksPayload);
         }
 
-  toast({
+        toast({
           title: t("eventSaved"),
           description:
             t("eventSavedDescription", { title: finalEventData.title }) +
             (eventsToCreate.length > 1 ? ` (${t("instancesCreated", { count: eventsToCreate.length })})` : ""),
           duration: 5000 
         });
+
+        // --- Actionable notification for event assignees (toast + push) ---
+        const assignees = Array.isArray(finalEventData.family_member_ids) ? finalEventData.family_member_ids : [];
+        if (user && assignees.includes(user.id)) {
+          let assignerName = user.name || "Someone";
+          const notifTitle = t("event.assignedToYouTitle") || "New Event Scheduled";
+          const notifBody = `${assignerName} scheduled an event for you: ${finalEventData.title}`;
+          toast({ title: notifTitle, description: notifBody, duration: 5000 });
+          // Push notification
+          triggerPushNotification({
+            title: notifTitle,
+            body: notifBody,
+            url: window.location.origin + createPageUrl ? createPageUrl('Schedule') : '/schedule',
+          });
+        }
       }
     } catch (error) {
       console.error("Error during final save:", error);
-  toast({ title: t("saveFailed"), description: t("somethingWentWrong"), variant: "destructive", duration: 5000  });
+      toast({ title: t("saveFailed"), description: t("somethingWentWrong"), variant: "destructive", duration: 5000  });
     } finally {
       setIsReviewDialogOpen(false);
       setReviewData(null);
       setSelectedEvent(null);
       setSelectedTimeSlot(null);
-  if (reload) await reload();
+      if (reload) await reload();
     }
   };
 
@@ -353,13 +417,12 @@ Category: "${eventData.category || ""}"`,
           let deletedTasksCount = 0;
 
           for (const seriesEvent of allSeriesEvents) {
-            const relatedTasks = await Task.filter({ related_event_id: seriesEvent.id });
+            const relatedTasks = (await Task.filter({ related_event_id: seriesEvent.id }))
+              .filter((task) => task.related_event_id === seriesEvent.id);
             if (relatedTasks.length > 0) {
-              // eslint-disable-next-line no-await-in-loop
               for (const task of relatedTasks) await Task.delete(task.id);
               deletedTasksCount += relatedTasks.length;
             }
-            // eslint-disable-next-line no-await-in-loop
             await ScheduleEvent.delete(seriesEvent.id);
           }
 
@@ -376,12 +439,12 @@ Category: "${eventData.category || ""}"`,
         }
       } else {
         try {
-          const relatedTasks = await Task.filter({ related_event_id: event.id });
+          const relatedTasks = (await Task.filter({ related_event_id: event.id }))
+            .filter((task) => task.related_event_id === event.id);
           if (relatedTasks.length > 0) {
             const shouldDeleteTasks = window.confirm(t("confirmDeleteRelatedTasks", { count: relatedTasks.length }));
             if (shouldDeleteTasks) {
               for (const task of relatedTasks) {
-                // eslint-disable-next-line no-await-in-loop
                 await Task.delete(task.id);
               }
             }
@@ -403,12 +466,12 @@ Category: "${eventData.category || ""}"`,
     } else {
       if (window.confirm(t("confirmDeleteEvent", { title: event.title }))) {
         try {
-          const relatedTasks = await Task.filter({ related_event_id: event.id });
+          const relatedTasks = (await Task.filter({ related_event_id: event.id }))
+            .filter((task) => task.related_event_id === event.id);
           if (relatedTasks.length > 0) {
             const shouldDeleteTasks = window.confirm(t("confirmDeleteRelatedTasks", { count: relatedTasks.length }));
             if (shouldDeleteTasks) {
               for (const task of relatedTasks) {
-                // eslint-disable-next-line no-await-in-loop
                 await Task.delete(task.id);
               }
             }
@@ -424,10 +487,10 @@ Category: "${eventData.category || ""}"`,
       }
     }
 
-    if (deletionSuccessful && reload) {
+    if (deletionSuccessful) {
       setIsEventDialogOpen(false);
       setSelectedEvent(null);
-      await reload();
+      // await reload();
     }
   };
 

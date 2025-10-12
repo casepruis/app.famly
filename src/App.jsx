@@ -6,6 +6,9 @@ import { FamilyDataProvider } from '@/hooks/FamilyDataContext';
 import PageWithLayout from '@/pages/PageWithLayout'; // new helper component
 
 import Index from '@/pages/index';
+import RequireAuth from '@/pages/RequireAuth';
+import SignIn from '@/pages/SignIn';
+import SignUp from '@/pages/SignUp';
 import Dashboard from '@/pages/Dashboard';
 import FamilySetup from '@/pages/FamilySetup';
 import Schedule from '@/pages/Schedule';
@@ -30,21 +33,23 @@ function App() {
         <Routes>
           <Route path="/" element={<PageWithLayout><Index /></PageWithLayout>} />
           <Route path="/index" element={<Navigate to="/" replace />} />
-          <Route path="/dashboard" element={<PageWithLayout><Dashboard /></PageWithLayout>} />
-          <Route path="/familysetup" element={<PageWithLayout><FamilySetup /></PageWithLayout>} />
-          <Route path="/schedule" element={<PageWithLayout><Schedule /></PageWithLayout>} />
-          <Route path="/tasks" element={<PageWithLayout><Tasks /></PageWithLayout>} />
-          <Route path="/events" element={<PageWithLayout><Events /></PageWithLayout>} />
-          <Route path="/wishlist" element={<PageWithLayout><Wishlist /></PageWithLayout>} />
-          <Route path="/familymembers" element={<PageWithLayout><FamilyMembers /></PageWithLayout>} />
-          <Route path="/connectors" element={<PageWithLayout><Connectors /></PageWithLayout>} />
-          <Route path="/chat" element={<PageWithLayout><Chat /></PageWithLayout>} />
-          <Route path="/aiassistant" element={<PageWithLayout><AIAssistant /></PageWithLayout>} />
-          <Route path="/debug" element={<PageWithLayout><Debug /></PageWithLayout>} />
-          <Route path="/admin" element={<PageWithLayout><Admin /></PageWithLayout>} />
-          <Route path="/platformadmin" element={<PageWithLayout><PlatformAdmin /></PageWithLayout>} />
-          <Route path="/datacleanup" element={<PageWithLayout><DataCleanup /></PageWithLayout>} />
-          <Route path="/databaserecovery" element={<PageWithLayout><DatabaseRecovery /></PageWithLayout>} />
+          <Route path="/signin" element={<SignIn />} />
+          <Route path="/signup" element={<SignUp />} />
+          <Route path="/dashboard" element={<RequireAuth><PageWithLayout><Dashboard /></PageWithLayout></RequireAuth>} />
+          <Route path="/familysetup" element={<RequireAuth><PageWithLayout><FamilySetup /></PageWithLayout></RequireAuth>} />
+          <Route path="/schedule" element={<RequireAuth><PageWithLayout><Schedule /></PageWithLayout></RequireAuth>} />
+          <Route path="/tasks" element={<RequireAuth><PageWithLayout><Tasks /></PageWithLayout></RequireAuth>} />
+          <Route path="/events" element={<RequireAuth><PageWithLayout><Events /></PageWithLayout></RequireAuth>} />
+          <Route path="/wishlist" element={<RequireAuth><PageWithLayout><Wishlist /></PageWithLayout></RequireAuth>} />
+          <Route path="/familymembers" element={<RequireAuth><PageWithLayout><FamilyMembers /></PageWithLayout></RequireAuth>} />
+          <Route path="/connectors" element={<RequireAuth><PageWithLayout><Connectors /></PageWithLayout></RequireAuth>} />
+          <Route path="/chat" element={<RequireAuth><PageWithLayout><Chat /></PageWithLayout></RequireAuth>} />
+          <Route path="/aiassistant" element={<RequireAuth><PageWithLayout><AIAssistant /></PageWithLayout></RequireAuth>} />
+          <Route path="/debug" element={<RequireAuth><PageWithLayout><Debug /></PageWithLayout></RequireAuth>} />
+          <Route path="/admin" element={<RequireAuth><PageWithLayout><Admin /></PageWithLayout></RequireAuth>} />
+          <Route path="/platformadmin" element={<RequireAuth><PageWithLayout><PlatformAdmin /></PageWithLayout></RequireAuth>} />
+          <Route path="/datacleanup" element={<RequireAuth><PageWithLayout><DataCleanup /></PageWithLayout></RequireAuth>} />
+          <Route path="/databaserecovery" element={<RequireAuth><PageWithLayout><DatabaseRecovery /></PageWithLayout></RequireAuth>} />
         </Routes>
         <Toaster />
       </FamilyDataProvider>
