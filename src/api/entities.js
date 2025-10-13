@@ -193,6 +193,12 @@ export const Task = {
     }
     return results;
   },
+  // Convert a task to an event
+  toEvent: (taskId, payload = {}) =>
+    fetchWithAuth(`/tasks/${taskId}/to-event`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };
 
 // ---------- Schedule Events ----------
@@ -284,6 +290,12 @@ export const ScheduleEvent = {
       .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
       .slice(0, 5);
   },
+  // Convert an event to a task
+  toTask: (eventId, payload = {}) =>
+    fetchWithAuth(`/schedule_events/${eventId}/to-task`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };
 
 // ---------- Family Members ----------
@@ -426,7 +438,13 @@ export const UserWhitelist = {
   list: () => fetchWithAuth("/user_whitelist/"),
   filter: () => fetchWithAuth("/user_whitelist/"),
   create: (data) => {
-    const payload = sanitizeEventPayload(data);
+    // Only include relevant fields for whitelisting
+    const payload = {
+      email: (data.email || '').toLowerCase(),
+      added_by: data.added_by || null,
+      notes: data.notes || null,
+      status: data.status || 'active',
+    };
     return fetchWithAuth("/user_whitelist/", {
       method: "POST",
       body: JSON.stringify(payload),

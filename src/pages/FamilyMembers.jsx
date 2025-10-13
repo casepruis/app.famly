@@ -29,6 +29,8 @@ const availableColors = [
 
 export default function FamilyMembers() {
   const { user, family, members, isLoading, reload } = useFamilyData();
+  // Find the current user's member profile (if any)
+  const currentUserMember = Array.isArray(members) && user ? members.find(m => m && m.user_id === user.id) : null;
   const [invitations, setInvitations] = useState([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingMember, setEditingMember] = useState(null);
@@ -80,7 +82,7 @@ export default function FamilyMembers() {
       try {
         await FamilyMember.delete(memberId);
         toast({ title: t('memberDeleted') || 'Member deleted', duration: 5000 });
-        loadMembers();
+          reload();
       } catch (error) {
         toast({ 
           title: t('error') || 'Error', 
@@ -98,7 +100,7 @@ export default function FamilyMembers() {
       try {
         await FamilyInvitation.delete(invitationId);
         toast({ title: t('invitationCanceled') || 'Invitation canceled' });
-        loadMembers();
+          reload();
       } catch (error) {
         toast({ 
           title: t('error') || 'Error', 
@@ -115,8 +117,8 @@ export default function FamilyMembers() {
     const user = await User.me();
     if (!user?.family_id) return;
 
-    const updated = await Family.updateName(user.family_id, (familyNameInput || "").trim());
-    setFamily(updated);
+    await Family.updateName(user.family_id, (familyNameInput || "").trim());
+    reload();
     setIsEditingFamilyName(false);
     // optional toast
     // toast({ title: 'Family name updated' });
@@ -152,7 +154,7 @@ const handleSave = async (memberData) => {
       toast({ title: t('memberAdded') || 'Member added', duration: 5000  });
     }
 
-    loadMembers();
+      reload();
     setIsDialogOpen(false);
   } catch (error) {
     console.error("❌ Save error:", error);
@@ -202,7 +204,7 @@ const handleSave = async (memberData) => {
         duration: 5000 
       });
 
-      loadMembers();
+        reload();
       setIsDialogOpen(false);
     } catch (error) {
       toast({ 
@@ -297,60 +299,26 @@ const handleSave = async (memberData) => {
   };
 
   const handleUpdateConnectedEmail = async (member, newEmail) => {
-    let oldConnectedUser;
-    try {
-        oldConnectedUser = await User.get(member.user_id);
-    } catch(e) {
-        toast({ title: t('error'), description: t('couldNotFindConnectedUser'), variant: 'destructive', duration: 5000  });
-        return;
-    }
-    
-    if (oldConnectedUser && oldConnecteduser.email === newEmail) {
-        toast({ title: t('noChangeNeeded'), description: t('emailAlreadyConnected'), variant: 'default', duration: 5000  });
-        return;
+    // Use member.user_id as the email directly
+    const oldEmail = member.user_id;
+    if (oldEmail === newEmail) {
+      toast({ title: t('noChangeNeeded'), description: t('emailAlreadyConnected'), variant: 'default', duration: 5000  });
+      return;
     }
 
-    if (!window.confirm(t('confirmDisconnect'))) return;
-
+    // Show a confirmation alert before changing the email (login)
+    if (!window.confirm('Changing the email will change the login for this member. Are you sure you want to proceed?')) return;
     try {
-      const user = await User.me();
-
-      // 1. Disconnect old user from family
-      await User.update(member.email, { family_id: null });
-
-      // 2. Find and properly update whitelist entry for the old user's email
-      const oldWhitelistEntries = await UserWhitelist.filter({ email: oldConnecteduser.email });
-      if (oldWhitelistEntries.length > 0) {
-        for (const entry of oldWhitelistEntries) {
-          await UserWhitelist.update(entry.id, { 
-            status: 'revoked', 
-            notes: `Disconnected from ${member.name} on ${new Date().toLocaleDateString()}. Access Revoked.` 
-          });
-        }
-      }
-
-      // 3. Update the member profile to remove user_id and set new pending email
       await FamilyMember.update(member.id, {
-        user_id: null,
-        pending_user_email: newEmail
+        ...member,
+        user_id: newEmail // always set user_id to the email
       });
-
-      // 4. Whitelist and invite the new email
-      await UserWhitelist.create({ 
-        email: newEmail.toLowerCase(), // Normalize email
-        added_by: user.email, 
-        status: 'active', 
-        notes: `Invitation for ${member.name}` 
-      });
-      await FamilyInvitation.create({ email: newEmail, family_id: user.family_id, invited_by: user.email, status: 'pending' });
-      
       toast({
-        title: t('invitationSent'),
-        description: `Invitation sent to ${newEmail}. The previous user has been disconnected.`,
+        title: t('memberUpdated'),
+        description: `Email updated to ${newEmail}.`,
         duration: 5000 
       });
-
-      loadMembers();
+      reload();
       setIsDialogOpen(false);
     } catch (error) {
       console.error("Error updating connected email:", error);
@@ -546,24 +514,37 @@ const handleSave = async (memberData) => {
                       </div>
                       <h3 className="font-semibold text-gray-900 text-lg">{member.name || 'Unknown'}</h3>
                       <p className="text-sm text-gray-500 capitalize mb-2">{t(member.role) || member.role || 'Unknown'}</p>
-                      
-                      {/* Show connection status */}
+
+                      {/* Show connection status and email */}
                       <div className="mb-3 min-h-[36px] flex flex-col justify-center items-center">
                         {member.user_id ? (
-                          <div className="flex items-center justify-center gap-1.5 py-1 px-2 bg-green-50 rounded-full border border-green-200">
-                            <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                            <span className="text-xs text-green-700 font-medium">{t('connected') || 'Connected'}</span>
-                          </div>
+                          <>
+                            <div className="flex items-center justify-center gap-1.5 py-1 px-2 bg-green-50 rounded-full border border-green-200">
+                              <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                              <span className="text-xs text-green-700 font-medium">{t('connected') || 'Connected'}</span>
+                            </div>
+                            {member.user_id && (
+                              <span className="text-xs text-gray-600 mt-1 break-all">{member.user_id}</span>
+                            )}
+                          </>
                         ) : member.pending_user_email ? (
-                          <div className="flex items-center justify-center gap-1.5 py-1 px-2 bg-orange-50 rounded-full border border-orange-200">
-                            <div className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></div>
-                            <span className="text-xs text-orange-700 font-medium">{t('invitationPending') || 'Invitation Pending'}</span>
-                          </div>
+                          <>
+                            <div className="flex items-center justify-center gap-1.5 py-1 px-2 bg-orange-50 rounded-full border border-orange-200">
+                              <div className="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></div>
+                              <span className="text-xs text-orange-700 font-medium">{t('invitationPending') || 'Invitation Pending'}</span>
+                            </div>
+                            <span className="text-xs text-gray-600 mt-1 break-all">{member.pending_user_email}</span>
+                          </>
                         ) : (
-                          <div className="flex items-center justify-center gap-1.5 py-1 px-2 bg-gray-100 rounded-full border border-gray-200">
-                            <div className="w-1.5 h-1.5 bg-gray-400 rounded-full"></div>
-                            <span className="text-xs text-gray-600 font-medium">{t('localOnly') || 'Local Only'}</span>
-                          </div>
+                          <>
+                            <div className="flex items-center justify-center gap-1.5 py-1 px-2 bg-gray-100 rounded-full border border-gray-200">
+                              <div className="w-1.5 h-1.5 bg-gray-400 rounded-full"></div>
+                              <span className="text-xs text-gray-600 font-medium">{t('localOnly') || 'Local Only'}</span>
+                            </div>
+                            {member.user_id && (
+                              <span className="text-xs text-gray-600 mt-1 break-all">{member.user_id}</span>
+                            )}
+                          </>
                         )}
                       </div>
 
@@ -641,14 +622,16 @@ const handleSave = async (memberData) => {
           </div>
         </div>
 
-        <MemberDialog
-            isOpen={isDialogOpen}
-            onClose={() => setIsDialogOpen(false)}
-            onSave={handleSave}
-            onInvite={handleInvite}
-            onConnectEmail={handleConnectEmail}
-            member={editingMember}
-        />
+    <MemberDialog
+      isOpen={isDialogOpen}
+      onClose={() => setIsDialogOpen(false)}
+      onSave={handleSave}
+      onInvite={handleInvite}
+      onConnectEmail={handleConnectEmail}
+      member={editingMember}
+      // Pass a prop to auto-fill name from email connection
+      autoFillNameFromEmail
+    />
     </div>
   );
 }

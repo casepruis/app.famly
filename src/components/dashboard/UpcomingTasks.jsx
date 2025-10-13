@@ -6,6 +6,8 @@ import { CheckSquare, ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import TaskForm from "@/components/tasks/TaskForm";
+import { Task } from "@/api/entities";
+import { useToast } from "@/components/ui/use-toast";
 import { useLanguage } from "@/components/common/LanguageProvider";
 import { format, parseISO } from "date-fns";
 
@@ -14,6 +16,9 @@ export default function UpcomingTasks({ tasks, familyMembers }) {
   const [dialogData, setDialogData] = useState(null);
   const navigate = useNavigate();
   const { t } = useLanguage();
+  const { toast } = useToast();
+  // Try to get reload from window context (Dashboard passes it via FamilyDataContext)
+  const reload = (window.__famly_reload || (() => {}));
   
   const getAssigneeColor = (ids) => {
     if (!ids || ids.length === 0) return '#64748b'; // Default for "all members"
@@ -26,7 +31,20 @@ export default function UpcomingTasks({ tasks, familyMembers }) {
     setShowDialog(true);
   };
   const handleDialogClose = () => setShowDialog(false);
-  const handleDialogSave = () => setShowDialog(false);
+  const handleDialogSave = async (taskData) => {
+    try {
+      // Try to get user from localStorage (or pass as prop/context if available)
+      const user = JSON.parse(localStorage.getItem("famlyai_user"));
+      if (!user) throw new Error("User not loaded");
+      let taskToSave = { ...taskData, family_id: user.family_id };
+      await Task.create(taskToSave);
+      toast({ title: t("task.createdTitle") || "Task created", description: taskToSave.title, duration: 5000 });
+      setShowDialog(false);
+      if (typeof reload === "function") reload();
+    } catch (err) {
+      toast({ title: t("errorSavingTask") || "Error saving task", description: err.message, variant: "destructive", duration: 5000 });
+    }
+  };
 
   return (
     <Card id="upcoming-tasks-card" className="h-full">

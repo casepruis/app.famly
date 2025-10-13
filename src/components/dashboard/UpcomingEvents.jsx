@@ -7,6 +7,8 @@ import { format, parseISO } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import EventDialog from "@/components/schedule/EventDialog";
+import { ScheduleEvent } from "@/api/entities";
+import { useToast } from "@/components/ui/use-toast";
 import { useLanguage } from "@/components/common/LanguageProvider";
 
 const getEventAppearance = (event) => {
@@ -35,6 +37,9 @@ export default function UpcomingEvents({ events, familyMembers }) {
   const [dialogData, setDialogData] = useState(null);
   const navigate = useNavigate();
   const { t } = useLanguage();
+  const { toast } = useToast();
+  // Try to get reload from window context (Dashboard passes it via FamilyDataContext)
+  const reload = (window.__famly_reload || (() => {}));
 
   const handleAddEvent = () => {
     // Prefill with today's date for new event, and ensure no id property is present
@@ -48,7 +53,20 @@ export default function UpcomingEvents({ events, familyMembers }) {
     setShowDialog(true);
   };
   const handleDialogClose = () => setShowDialog(false);
-  const handleDialogSave = () => setShowDialog(false);
+  const handleDialogSave = async (eventData) => {
+    try {
+      // Try to get user from localStorage (or pass as prop/context if available)
+      const user = JSON.parse(localStorage.getItem("famlyai_user"));
+      if (!user) throw new Error("User not loaded");
+      let eventToSave = { ...eventData, family_id: user.family_id };
+      await ScheduleEvent.create(eventToSave);
+      toast({ title: t("eventCreated") || "Event created", description: eventToSave.title, duration: 5000 });
+      setShowDialog(false);
+      if (typeof reload === "function") reload();
+    } catch (err) {
+      toast({ title: t("errorSavingEvent") || "Error saving event", description: err.message, variant: "destructive", duration: 5000 });
+    }
+  };
   const handleDialogDelete = () => setShowDialog(false);
 
   return (

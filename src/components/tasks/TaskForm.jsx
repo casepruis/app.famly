@@ -344,10 +344,33 @@ export default function TaskForm({
           </div>
         </form>
 
-        <DialogFooter className="flex-shrink-0 pt-4">
+        <DialogFooter className="flex-shrink-0 pt-4 gap-2">
           <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
             {t("cancel")}
           </Button>
+          {task && task.id && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={async () => {
+                try {
+                  if (typeof window !== 'undefined') window.famlyToast?.info(t('convertingTaskToEvent') || 'Converting task to event...');
+                  await import('@/api/entities').then(async ({ Task }) => {
+                    await Task.toEvent(task.id);
+                    await Task.delete(task.id);
+                  });
+                  if (typeof window !== 'undefined') window.famlyToast?.success(t('taskConvertedToEvent') || 'Task converted to event!');
+                  if (onClose) onClose();
+                } catch (err) {
+                  if (typeof window !== 'undefined') window.famlyToast?.error(t('taskConvertToEventFailed') || 'Failed to convert task to event.');
+                }
+              }}
+              disabled={busy}
+              className="gap-1"
+            >
+              <Repeat className="w-4 h-4" /> {t('convertToEvent') || 'Convert to Event'}
+            </Button>
+          )}
           <Button
             type="submit"
             form="task-form"

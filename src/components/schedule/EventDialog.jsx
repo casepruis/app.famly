@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -341,7 +340,12 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
     const handleDelete = () => {
         if (initialData && onDelete) {
             // The parent `onDelete` function will now handle all confirmations.
+            // eslint-disable-next-line no-console
+            console.log('[FamlyAI] handleDelete called in EventDialog', initialData);
             onDelete(initialData);
+        } else {
+            // eslint-disable-next-line no-console
+            console.warn('[FamlyAI] handleDelete not called: missing initialData or onDelete', { initialData, onDelete });
         }
     };
 
@@ -408,12 +412,7 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
                             </div>
                         )}
                     </DialogTitle>
-                                        {/* Only show delete button for existing events (with id) */}
-                                                                                {onDelete && initialData && initialData.id && typeof initialData.id === 'string' && initialData.id.trim() !== '' && (
-                                                                                    <Button variant="ghost" size="sm" className="absolute top-2 right-2 text-red-500" onClick={() => onDelete(initialData)}>
-                                                                                        <Trash2 className="w-4 h-4" />
-                                                                                    </Button>
-                                                                                )}
+
                 </DialogHeader>
 
                 <div className="flex-1 overflow-y-auto pr-2">
@@ -581,7 +580,11 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
                                 <PopoverTrigger asChild>
                                     <Button variant="outline" className="w-full justify-start text-left font-normal">
                                         <Users className="mr-2 h-4 w-4" />
-                                        {(eventData.family_member_ids || []).length === 0 ? (t('assignToDefault') || 'Assign to (default: all)') : t('membersSelected', { count: (eventData.family_member_ids || []).length }) || `${(eventData.family_member_ids || []).length} member(s) selected`}
+                                                                                {(eventData.family_member_ids || []).length === 0
+                                                                                    ? (t('assignToDefault') || 'Assign to (default: all)')
+                                                                                    : (eventData.family_member_ids || []).length === 1
+                                                                                        ? (t('membersSelectedOne') || '1 member selected')
+                                                                                        : t('membersSelectedMany', { count: (eventData.family_member_ids || []).length }) || `${(eventData.family_member_ids || []).length} members selected`}
                                     </Button>
                                 </PopoverTrigger>
                                 <PopoverContent className="w-64 p-3">
@@ -637,10 +640,39 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
                         </div>
 
                         <div className="flex justify-between gap-3 pt-4 border-t pb-4">
-                            <div>
-                                {onDelete && initialData && initialData.id && typeof initialData.id === 'string' && initialData.id.trim() !== '' && (
+                            <div className="flex gap-2">
+                                {onDelete && initialData && (
+                                    (typeof initialData.id === 'string' ? initialData.id.trim() !== '' : initialData.id !== undefined && initialData.id !== null)
+                                ) && (
                                     <Button type="button" variant="destructive" onClick={handleDelete} className="gap-1">
                                         <Trash2 className="w-4 h-4" /> {t('deleteEvent') || 'Delete event'}
+                                    </Button>
+                                )}
+                                {initialData && initialData.id && (
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        onClick={async () => {
+                                            try {
+                                                setIsProcessing(true);
+                                                await ScheduleEvent.toTask(initialData.id);
+                                                await ScheduleEvent.delete(initialData.id);
+                                                if (typeof window !== 'undefined' && window?.famlyToast) {
+                                                    window.famlyToast.success(t('eventConvertedToTask') || 'Event converted to task!');
+                                                }
+                                                if (onClose) onClose();
+                                            } catch (err) {
+                                                if (typeof window !== 'undefined' && window?.famlyToast) {
+                                                    window.famlyToast.error(t('eventConvertToTaskFailed') || 'Failed to convert event to task.');
+                                                }
+                                            } finally {
+                                                setIsProcessing(false);
+                                            }
+                                        }}
+                                        disabled={isProcessing}
+                                        className="gap-1"
+                                    >
+                                        <Repeat className="w-4 h-4" /> {t('convertToTask') || 'Convert to Task'}
                                     </Button>
                                 )}
                             </div>

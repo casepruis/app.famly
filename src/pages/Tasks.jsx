@@ -1,5 +1,53 @@
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+// --- WebSocket for real-time task updates ---
+const useTaskWebSocket = (reload) => {
+  const wsRef = useRef(null);
+  useEffect(() => {
+    if (!reload) return;
+    let ws;
+    try {
+      const token = localStorage.getItem("famlyai_token");
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const host = window.location.host;
+      const WS_BASE = (import.meta)?.env?.VITE_WS_BASE || `${protocol}//${host}`;
+      ws = new window.WebSocket(`${WS_BASE}/ws?token=${encodeURIComponent(token)}`);
+      wsRef.current = ws;
+      ws.onmessage = (msg) => {
+        try {
+          const data = JSON.parse(msg.data);
+          if (data && (
+            data.type === 'task_created' || 
+            data.type === 'task_updated' || 
+            data.type === 'task_deleted')) {
+            reload();
+          }
+        } catch {}
+      };
+    } catch {}
+    return () => { try { ws && ws.close(); } catch {} };
+  }, [reload]);
+};
+// Helper to trigger a push notification via the service worker
+async function triggerPushNotification({ title, body, url }) {
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      const reg = await navigator.serviceWorker?.ready;
+      if (reg?.showNotification) {
+        await reg.showNotification(title, {
+          body,
+          icon: '/icons/icon-192.png',
+          badge: '/icons/badge-72.png',
+          data: { url: url || '/' },
+        });
+      } else {
+        new Notification(title, { body, icon: '/icons/icon-192.png' });
+      }
+    } catch (e) {
+      // fallback: ignore
+    }
+  }
+}
 import { useFamilyData } from "@/hooks/FamilyDataContext";
 import { AnimatePresence, motion } from "framer-motion";
 import { useSearchParams } from "react-router-dom";
@@ -139,6 +187,8 @@ function Tasks() {
       window.removeEventListener('actionTriggered', handleAction);
     };
   }, [searchParams]);
+  // WebSocket for real-time task updates
+  useTaskWebSocket(reload);
 
   const handleFilterChange = (newFilters) => {
     setFilters(newFilters);
@@ -187,18 +237,39 @@ function Tasks() {
       }
 
       setIsSaving(true);
+      let createdOrUpdatedTask = null;
+
       if (editingTask) {
-        await Task.update(editingTask.id, taskToSave);
+        createdOrUpdatedTask = await Task.update(editingTask.id, taskToSave);
         toast({ title: t("task.updatedTitle"), description: "Task updated", duration: 5000 });
       } else {
-        await Task.create(taskToSave);  // backend now generates id
+        createdOrUpdatedTask = await Task.create(taskToSave);  // backend now generates id
         toast({ title: t("task.createdTitle"), description: "Task created", duration: 5000  });
       }
+
+      // --- Actionable notification for assignees (toast + push) ---
+      const assignees = Array.isArray(taskToSave.assigned_to) ? taskToSave.assigned_to : [];
+      if (assignees.includes(user.id)) {
+        let assignerName = user.name || "Someone";
+        if (editingTask && editingTask.updated_by && editingTask.updated_by !== user.id) {
+          assignerName = (familyMembers.find(m => m.id === editingTask.updated_by)?.name) || assignerName;
+        }
+        const notifTitle = t("task.assignedToYouTitle") || "New Task Assigned";
+        const notifBody = `${assignerName} added a task for you: ${taskToSave.title}`;
+        toast({ title: notifTitle, description: notifBody, duration: 5000 });
+        // Push notification
+        triggerPushNotification({
+          title: notifTitle,
+          body: notifBody,
+          url: window.location.origin + createPageUrl ? createPageUrl('Tasks') : '/tasks',
+        });
+      }
+
       setIsSaving(false);
 
       setIsFormOpen(false);
       setEditingTask(null);
-      if (reload) await reload();
+  // if (reload) await reload();
     } catch (error) {
       setIsInferring(false);
       setIsSaving(false);
@@ -218,7 +289,7 @@ function Tasks() {
   const handleDeleteTask = async (taskId) => {
     try {
         await Task.delete(taskId);
-  if (reload) await reload();
+  // if (reload) await reload();
         toast({ title: t("task.deletedTitle") , duration: 5000 });
     } catch (error) {
         toast({ title: t("error"), description: t("task.deleteError"), variant: "destructive" , duration: 5000 });

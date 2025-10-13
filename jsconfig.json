@@ -4,7 +4,9 @@
     "paths": {
       "@/*": ["./src/*"]
     },
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "module": "es2020",
+    "target": "es2020"
   },
   "include": ["src/**/*.js", "src/**/*.jsx", "src/api/integrations.ts"]
 } 
