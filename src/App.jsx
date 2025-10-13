@@ -5,7 +5,7 @@ import { LanguageProvider } from '@/components/common/LanguageProvider';
 import { FamilyDataProvider } from '@/hooks/FamilyDataContext';
 import PageWithLayout from '@/pages/PageWithLayout'; // new helper component
 
-import Index from '@/pages/index';
+import Index from '@/pages/Index';
 import RequireAuth from '@/pages/RequireAuth';
 import SignIn from '@/pages/SignIn';
 import SignUp from '@/pages/SignUp';

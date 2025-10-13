@@ -5,7 +5,7 @@ $LOC="westeurope"
 $ACR_NAME="famlyacr"        
 $FE_IMG="famly-fe"
 $BE_IMG="famly-be"
-$FE_TAG="v16"
+$FE_TAG="v17"
 $BE_TAG="v3"
 
 $ENV        = "env-famly"
