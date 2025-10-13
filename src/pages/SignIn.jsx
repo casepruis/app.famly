@@ -53,6 +53,11 @@ export default function SignIn() {
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <Input id="password" type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required autoComplete="current-password" />
+              <div className="text-right mt-1">
+                <Button variant="link" type="button" className="text-xs p-0" onClick={() => navigate('/reset-password-request')}>
+                  Forgot password?
+                </Button>
+              </div>
             </div>
             <Button size="lg" type="submit" disabled={loading || !email || !password} className="w-full bg-gradient-to-r from-blue-500 to-green-500 hover:from-blue-600 hover:to-green-600 text-white shadow-lg px-12 py-6 text-lg rounded-xl">
               {loading ? <Loader2 className="w-6 h-6 mr-3 animate-spin" /> : <LogIn className="w-6 h-6 mr-3" />}

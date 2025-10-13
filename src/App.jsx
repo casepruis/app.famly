@@ -24,7 +24,8 @@ import Admin from '@/pages/Admin';
 import PlatformAdmin from '@/pages/PlatformAdmin';
 import DataCleanup from '@/pages/DataCleanup';
 import DatabaseRecovery from '@/pages/DatabaseRecovery';
-
+import ResetPasswordRequest from '@/pages/ResetPasswordRequest';
+import ResetPassword from '@/pages/ResetPassword';
 
 function App() {
   return (
@@ -50,6 +51,8 @@ function App() {
           <Route path="/platformadmin" element={<RequireAuth><PageWithLayout><PlatformAdmin /></PageWithLayout></RequireAuth>} />
           <Route path="/datacleanup" element={<RequireAuth><PageWithLayout><DataCleanup /></PageWithLayout></RequireAuth>} />
           <Route path="/databaserecovery" element={<RequireAuth><PageWithLayout><DatabaseRecovery /></PageWithLayout></RequireAuth>} />
+          <Route path="/reset-password-request" element={<ResetPasswordRequest />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
         </Routes>
         <Toaster />
       </FamilyDataProvider>
