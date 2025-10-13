@@ -438,7 +438,13 @@ export const UserWhitelist = {
   list: () => fetchWithAuth("/user_whitelist/"),
   filter: () => fetchWithAuth("/user_whitelist/"),
   create: (data) => {
-    const payload = sanitizeEventPayload(data);
+    // Only include relevant fields for whitelisting
+    const payload = {
+      email: (data.email || '').toLowerCase(),
+      added_by: data.added_by || null,
+      notes: data.notes || null,
+      status: data.status || 'active',
+    };
     return fetchWithAuth("/user_whitelist/", {
       method: "POST",
       body: JSON.stringify(payload),
