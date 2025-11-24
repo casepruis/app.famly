@@ -299,11 +299,18 @@ function Tasks() {
   const handleStatusChange = async (taskId, newStatus) => {
     try {
       const taskToUpdate = tasks.find(task => task.id === taskId);
-      await Task.update(taskId, { ...taskToUpdate, status: newStatus });
-      loadData();
+      // Only send the fields that are needed for the update
+      await Task.update(taskId, { status: newStatus });
+      reload();
       toast({ title: t("task.statusUpdatedTitle"), description: "Task updated", duration: 5000  });
     } catch (error) {
-      toast({ title: t("error"), description: t("task.statusUpdateError"), variant: "destructive", duration: 5000  });
+      console.error('Task status update error:', error);
+      toast({ 
+        title: t("error"), 
+        description: error.message || t("task.statusUpdateError"), 
+        variant: "destructive", 
+        duration: 5000 
+      });
     }
   };
 
