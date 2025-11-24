@@ -44,6 +44,7 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { getLanguageInfo } from "@/components/common/translations";
+// import TimezoneSelector from "@/components/common/TimezoneSelector";
 import { User, FamilyMember, Family, Conversation, ChatMessage, Push } from "@/api/entities";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/use-toast";
@@ -671,11 +672,13 @@ function LayoutContent({ children, currentPageName }) {
               </SidebarMenu>
             </SidebarContent>
 
-            <SidebarFooter className="p-3 border-t" style={{borderColor: 'var(--famly-accent)'}}>
+            <SidebarFooter className="p-3 border-t space-y-3" style={{borderColor: 'var(--famly-accent)'}}>
               <div className="flex items-center justify-between">
                 <UserAvatar user={currentUser} family={family} />
                 <LanguageSelector />
               </div>
+              {/* Temporarily disabled while debugging */}
+              {/* <TimezoneSelector /> */}
             </SidebarFooter>
           </Sidebar>
         )}

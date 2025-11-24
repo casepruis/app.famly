@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from '@/components/ui/toaster';
 import { LanguageProvider } from '@/components/common/LanguageProvider';
 import { FamilyDataProvider } from '@/hooks/FamilyDataContext';
+import { useTimezoneDetection } from '@/hooks/useTimezoneDetection';
 import PageWithLayout from '@/pages/PageWithLayout'; // new helper component
 
 import Index from '@/pages/Index';
@@ -28,6 +29,9 @@ import ResetPasswordRequest from '@/pages/ResetPasswordRequest';
 import ResetPassword from '@/pages/ResetPassword';
 
 function App() {
+  // Automatically detect and store user timezone
+  useTimezoneDetection();
+
   return (
     <LanguageProvider>
       <FamilyDataProvider>

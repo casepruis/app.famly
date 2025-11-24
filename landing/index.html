@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>famly.ai – Family AI Assistant</title>
+  <link rel="icon" href="famly_kama_icon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script defer src="main.js"></script>
+  <style>
+    body {
+      min-height: 100vh;
+      font-family: 'Inter', 'Segoe UI', system-ui, Arial, sans-serif;
+      background: linear-gradient(135deg, #f9fafb 0%, #f0fdf4 100%);
+      color: #334155;
+      position: relative;
+      overflow-x: hidden;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.2rem 2rem 0.5rem 2rem;
+      position: relative;
+      z-index: 2;
+      background: transparent;
+    }
+    .logo-main {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 1px 4px #0001;
+      padding: 0.18rem;
+    }
+    .nav-title {
+      font-size: 1.7rem;
+      font-weight: 400;
+      background: linear-gradient(90deg, #2563eb 30%, #22d3ee 60%, #22c55e 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin: 0 0 0 0.8rem;
+      letter-spacing: -0.5px;
+    }
+    .beta-form-top {
+      display: flex;
+      gap: 0.4rem;
+      align-items: center;
+      background: #f8fafc;
+      border-radius: 1.5rem;
+      box-shadow: 0 1px 2px #0001;
+      padding: 0.2rem 0.7rem 0.2rem 1rem;
+      font-size: 0.97rem;
+      margin-left: auto;
+      border: 1px solid #e5e7eb;
+    }
+    .beta-form-top input[type="email"] {
+      border: none;
+      background: transparent;
+      font-size: 0.97rem;
+      padding: 0.3rem 0.5rem;
+      outline: none;
+      min-width: 120px;
+      color: #64748b;
+      font-weight: 300;
+    }
+    .beta-form-top button {
+      background: linear-gradient(90deg, #2563eb, #22d3ee, #22c55e);
+      color: #fff;
+      border: none;
+      border-radius: 1rem;
+      padding: 0.3rem 1rem;
+      font-size: 0.97rem;
+      font-weight: 400;
+      cursor: pointer;
+      transition: background 0.2s;
+      box-shadow: none;
+    }
+    .beta-form-top button:hover {
+      background: linear-gradient(90deg, #1d4ed8, #06b6d4, #16a34a);
+    }
+    .beta-message-top {
+      min-width: 1.5em;
+      color: #16a34a;
+      font-weight: 400;
+      margin-left: 0.5rem;
+    }
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 0 2vw;
+      position: relative;
+      z-index: 1;
+    }
+    .hero-section {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 2.2rem;
+      margin-top: 1.2rem;
+      margin-bottom: 2.2rem;
+      flex-wrap: wrap;
+    }
+    .hero-content {
+      flex: 1 1 400px;
+      min-width: 320px;
+    }
+    .hero-headline {
+      font-size: 2.1rem;
+      font-weight: 400;
+      margin-bottom: 1.1rem;
+      color: #334155;
+      line-height: 1.13;
+      letter-spacing: -0.5px;
+    }
+    .hero-sub {
+      font-size: 1.05rem;
+      color: #38bdf8;
+      margin-bottom: 1.1rem;
+      font-weight: 300;
+      letter-spacing: -0.2px;
+    }
+    .hero-desc {
+      font-size: 0.98rem;
+      color: #64748b;
+      margin-bottom: 1.5rem;
+      max-width: 500px;
+      font-weight: 300;
+    }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.1rem;
+      margin-bottom: 2.2rem;
+    }
+    .feature-card {
+      background: #f8fafc;
+      border-radius: 1.1rem;
+      box-shadow: 0 1px 2px #0001;
+      padding: 1.1rem 0.8rem 1rem 0.8rem;
+      display: flex;
+      flex-direction: row;
+      align-items: flex-start;
+      min-height: 100px;
+      gap: 0.7rem;
+      border: 1px solid #e5e7eb;
+      max-width: 240px;
+      margin: 0 auto;
+    }
+    .feature-icon {
+      width: 32px;
+      height: 32px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f0fdf4;
+      border-radius: 0.7rem;
+      box-shadow: 0 1px 2px #22c55e11;
+      font-size: 1.2rem;
+      margin-top: 0.1rem;
+    }
+    .feature-content {
+      display: flex;
+      flex-direction: column;
+    }
+    .feature-title {
+      font-size: 1rem;
+      font-weight: 400;
+      color: #2563eb;
+      margin-bottom: 0.1rem;
+      letter-spacing: -0.2px;
+    }
+    .feature-desc {
+      font-size: 0.93rem;
+      color: #64748b;
+      font-weight: 300;
+    }
+    .stats-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.1rem;
+      margin-bottom: 2.2rem;
+      justify-content: center;
+    }
+    .stat-card {
+      background: #f0fdf4;
+      border-radius: 1.1rem;
+      box-shadow: 0 1px 2px #22c55e11;
+      padding: 1.1rem 1.5rem;
+      min-width: 150px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      border: 1px solid #e5e7eb;
+    }
+    .stat-value {
+      font-size: 1.1rem;
+      font-weight: 400;
+      color: #22c55e;
+      margin-bottom: 0.2rem;
+      letter-spacing: -0.2px;
+    }
+    .stat-label {
+      font-size: 0.93rem;
+      color: #2563eb;
+      font-weight: 300;
+    }
+    .testimonials-section {
+      background: #f8fafc;
+      border-radius: 1.1rem;
+      box-shadow: 0 1px 2px #0001;
+      padding: 1.2rem 1.1rem;
+      margin-bottom: 1.5rem;
+      max-width: 800px;
+      margin-left: auto;
+      margin-right: auto;
+      border: 1px solid #e5e7eb;
+    }
+    .testimonials-section h3 {
+      color: #22c55e;
+      margin-top: 0;
+      font-size: 1rem;
+      font-weight: 400;
+      text-align: center;
+      letter-spacing: -0.2px;
+    }
+    .quotes {
+      display: flex;
+      flex-direction: row;
+      gap: 0.7rem;
+      margin-top: 1.2rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .quotes blockquote {
+      background: #fff;
+      border-left: 3px solid #22c55e;
+      border-radius: 0.6rem;
+      padding: 0.7rem 1rem;
+      font-style: italic;
+      color: #2563eb;
+      margin: 0;
+      font-size: 0.93rem;
+      max-width: 220px;
+      font-weight: 300;
+    }
+    .quotes span {
+      display: block;
+      color: #888;
+      font-size: 0.9rem;
+      margin-top: 0.3rem;
+      text-align: right;
+      font-weight: 300;
+    }
+    .screenshot-full {
+      display: block;
+      width: 100%;
+      max-width: 1100px;
+      margin: 2.2rem auto 2.2rem auto;
+      border-radius: 1.1rem;
+      box-shadow: 0 2px 8px #22d3ee11;
+      border: 1px solid #e5e7eb;
+      background: #fff;
+      object-fit: cover;
+      padding-bottom: 2.2rem;
+    }
+    footer {
+      text-align: center;
+      color: #888;
+      font-size: 0.98rem;
+      padding: 1.5rem 1rem 1.2rem 1rem;
+      font-weight: 300;
+    }
+    footer a {
+      color: #2563eb;
+      text-decoration: none;
+    }
+    footer a:hover {
+      text-decoration: underline;
+    }
+    @media (max-width: 1100px) {
+      .features-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    @media (max-width: 700px) {
+      .features-grid {
+        grid-template-columns: 1fr;
+      }
+      .feature-card {
+        max-width: 100%;
+      }
+    }
+    @media (max-width: 900px) {
+      .hero-section {
+        flex-direction: column;
+        gap: 1.2rem;
+      }
+      .quotes {
+        flex-direction: column;
+        gap: 0.7rem;
+      }
+      .screenshot-full {
+        max-width: 98vw;
+      }
+      .topbar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.7rem;
+        padding: 1.1rem 1.1rem 0.5rem 1.1rem;
+      }
+      .beta-form-top {
+        margin-left: 0;
+        width: 100%;
+        justify-content: flex-end;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-shape1"></div>
+  <div class="bg-shape2"></div>
+  <div class="topbar">
+    <div style="display: flex; align-items: center;">
+      <img src="famly_kama_icon.svg" alt="famly.ai logo" class="logo-main">
+      <span class="nav-title">famly.ai</span>
+    </div>
+    <form class="beta-form-top" id="betaFormTop">
+      <input type="email" id="betaEmailTop" placeholder="Email for beta" required>
+      <button type="submit">Join</button>
+      <span class="beta-message-top" id="betaMessageTop"></span>
+    </form>
+  </div>
+  <main>
+    <section class="hero-section">
+      <div class="hero-content">
+        <div class="hero-headline">The gentle AI assistant for families</div>
+        <div class="hero-sub">Organize, connect, and thrive together</div>
+        <div class="hero-desc">famly.ai brings everyone together with a beautiful, private dashboard for tasks, events, and gentle AI-powered help. Designed for warmth, privacy, and ease.</div>
+      </div>
+    </section>
+    <section class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon" title="Dashboard">📊</div>
+        <div class="feature-content">
+          <div class="feature-title">Unified dashboard</div>
+          <div class="feature-desc">Tasks, events, and reminders in one calming place for your whole family.</div>
+        </div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" title="Privacy">🔒</div>
+        <div class="feature-content">
+          <div class="feature-title">Private & secure</div>
+          <div class="feature-desc">Family-only sharing. No ads, no tracking, just your data – always private.</div>
+        </div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" title="AI">🤖</div>
+        <div class="feature-content">
+          <div class="feature-title">Gentle AI help</div>
+          <div class="feature-desc">AI assists with planning, chores, and communication, always with a gentle touch.</div>
+        </div>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" title="Family">👨‍👩‍👧‍👦</div>
+        <div class="feature-content">
+          <div class="feature-title">Beautiful for all ages</div>
+          <div class="feature-desc">A design that feels welcoming and easy for everyone, from kids to grandparents.</div>
+        </div>
+      </div>
+    </section>
+    <img src="screenshot1.png" alt="famly.ai dashboard full" class="screenshot-full">
+    <section class="stats-row">
+      <div class="stat-card">
+        <div class="stat-value">4,200+</div>
+        <div class="stat-label">Tasks completed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">98%</div>
+        <div class="stat-label">Family satisfaction</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">1,100+</div>
+        <div class="stat-label">Events organized</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">100%</div>
+        <div class="stat-label">Private by design</div>
+      </div>
+    </section>
+    
+    <section class="testimonials-section">
+      <h3>What families are saying</h3>
+      <div class="quotes">
+        <div>
+          <blockquote>“It’s the first app my whole family actually enjoys using together.”</blockquote>
+          <span>– Early Beta Parent</span>
+        </div>
+        <div>
+          <blockquote>“The dashboard feels so calm and welcoming. It’s not overwhelming like other tools.”</blockquote>
+          <span>– Family Organizer</span>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer>
+    &copy; 2025 famly.ai &mdash; <a href="mailto:hello@famly.ai">Contact us</a>
+  </footer>
+  <script>
+    // Move beta form logic to topbar
+    document.getElementById('betaFormTop').addEventListener('submit', function(e) {
+      e.preventDefault();
+      var email = document.getElementById('betaEmailTop').value;
+      var msg = document.getElementById('betaMessageTop');
+      if (!email.match(/^[^@\s]+@[^@\s]+\.[^@\s]+$/)) {
+        msg.textContent = 'Enter a valid email.';
+        msg.style.color = '#ef4444';
+        return;
+      }
+      msg.textContent = 'Thank you! We’ll be in touch.';
+      msg.style.color = '#16a34a';
+      // Optionally send to backend here
+    });
+  </script>
+</body>
+</html>

@@ -13,6 +13,17 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 import ChatWindow from '../components/chat/ChatWindow';
 
@@ -20,6 +31,7 @@ export default function ChatPage() {
     const [activeConversation, setActiveConversation] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const [chatVersion, setChatVersion] = useState(0); // To force re-render
+    const [showClearDialog, setShowClearDialog] = useState(false);
     
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
@@ -71,30 +83,14 @@ export default function ChatPage() {
     const handleClearChat = async () => {
         if (!activeConversationId) return;
         
-        const isConfirmed = window.confirm(
-            t('confirmClearChat') || 'Are you sure you want to delete all messages in this chat? This action cannot be undone.'
-        );
-
-        if (isConfirmed) {
-            try {
-                await ChatMessage.emptyConversation(activeConversationId);
-                // const messagesToDelete = await ChatMessage.filter({ conversation_id: activeConversationId });
-                // // Filter only messages from the current user (security/privacy consideration, adjust if needed)
-                // // For a full chat clear, simply delete all messages associated with the conversation_id
-                
-                // // Fetch all messages for the active conversation
-                // const allConversationMessages = await ChatMessage.filter({ conversation_id: activeConversationId });
-
-                // // Delete each message
-                // for (const message of allConversationMessages) {
-                //     await ChatMessage.delete(message.id);
-                // }
-                toast({ title: t('chatCleared') || 'Chat Cleared', description: t('allMessagesDeleted') || 'All messages have been deleted.', duration: 5000 });
-                setChatVersion(v => v + 1); // Force re-render of ChatWindow
-            } catch (error) {
-                console.error("Failed to clear chat:", error);
-                toast({ title: t('error') || 'Error', description: t('couldNotClearChat') || 'Could not clear chat messages.', variant: "destructive", duration: 5000  });
-            }
+        try {
+            await ChatMessage.emptyConversation(activeConversationId);
+            toast({ title: t('chatCleared') || 'Chat Cleared', description: t('allMessagesDeleted') || 'All messages have been deleted.', duration: 5000 });
+            setChatVersion(v => v + 1); // Force re-render of ChatWindow
+            setShowClearDialog(false);
+        } catch (error) {
+            console.error("Failed to clear chat:", error);
+            toast({ title: t('error') || 'Error', description: t('couldNotClearChat') || 'Could not clear chat messages.', variant: "destructive", duration: 5000  });
         }
     };
 
@@ -163,7 +159,7 @@ export default function ChatPage() {
                                         <Settings className="w-4 h-4 mr-2" />
                                         {t('chatSettings') || 'Chat Settings'}
                                     </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={handleClearChat} className="text-red-600 focus:text-red-700">
+                                    <DropdownMenuItem onClick={() => setShowClearDialog(true)} className="text-red-600 focus:text-red-700">
                                         <Trash2 className="w-4 h-4 mr-2" />
                                         {t('clearChat') || 'Clear Chat'}
                                     </DropdownMenuItem>
@@ -182,6 +178,31 @@ export default function ChatPage() {
                         />
                 </div>
             </div>
+
+            {/* Clear Chat Confirmation Dialog */}
+            <AlertDialog open={showClearDialog} onOpenChange={setShowClearDialog}>
+                <AlertDialogContent className="w-[95vw] max-w-md mx-auto">
+                    <AlertDialogHeader className="text-left">
+                        <AlertDialogTitle className="text-lg font-semibold text-red-600">
+                            {t('clearChat') || 'Clear Chat'}
+                        </AlertDialogTitle>
+                        <AlertDialogDescription className="text-sm text-gray-600 leading-relaxed mt-2">
+                            {t('confirmClearChat') || 'Are you sure you want to delete all messages in this chat? This action cannot be undone.'}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter className="flex flex-col sm:flex-row gap-2 mt-4">
+                        <AlertDialogCancel className="w-full sm:w-auto">
+                            {t('cancel') || 'Cancel'}
+                        </AlertDialogCancel>
+                        <AlertDialogAction 
+                            onClick={handleClearChat}
+                            className="w-full sm:w-auto bg-red-600 hover:bg-red-700 focus:ring-red-500"
+                        >
+                            {t('clearChat') || 'Clear Chat'}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }
