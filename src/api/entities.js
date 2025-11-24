@@ -144,6 +144,13 @@ export const User = {
       method: "PUT",
       body: JSON.stringify(patch),
     }),
+
+  // Update user timezone
+  updateTimezone: (timezone) =>
+    fetchWithAuth("/users/me", {
+      method: "PUT",
+      body: JSON.stringify({ timezone }),
+    }),
 };
 
 // ---------- Tasks ----------
@@ -217,9 +224,13 @@ const VALID_EVENT_CATEGORIES = new Set([
 
 const normalizeOutgoingDate = (value, { end = false } = {}) => {
   if (!value) return value;
-  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
   if (typeof value === "string") {
-    if (/[zZ]|[+\-]\d{2}:\d{2}$/.test(value)) return value; // already tz-aware
+    if (/[zZ]|[+\-]\d{2}:\d{2}$/.test(value)) {
+      return value; // already tz-aware
+    }
     if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
       return end ? `${value}T23:59:00` : `${value}T00:00:00`;
     }
@@ -231,8 +242,10 @@ const normalizeOutgoingDate = (value, { end = false } = {}) => {
 
 const sanitizeEventPayload = (e) => {
   const payload = { ...e };
+  
   payload.start_time = normalizeOutgoingDate(payload.start_time, { end: false });
   payload.end_time = normalizeOutgoingDate(payload.end_time, { end: true });
+  
   if (!Array.isArray(payload.family_member_ids)) {
     payload.family_member_ids = payload.family_member_ids
       ? [payload.family_member_ids].flat()

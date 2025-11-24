@@ -63,9 +63,16 @@ export default function SignIn() {
               {loading ? <Loader2 className="w-6 h-6 mr-3 animate-spin" /> : <LogIn className="w-6 h-6 mr-3" />}
               {loading ? 'Signing in…' : 'Log In'}
             </Button>
-            <div className="mt-4 text-center">
-              <span>Don't have an account? </span>
-              <Button variant="link" type="button" onClick={() => navigate('/signup')}>Sign Up</Button>
+            <div className="mt-4 text-center space-y-2">
+              <div>
+                <span>Don't have an account? </span>
+                <Button variant="link" type="button" onClick={() => navigate('/signup')}>Sign Up</Button>
+              </div>
+              <div>
+                <Button variant="link" type="button" onClick={() => navigate('/reset-password-request')} className="text-sm">
+                  Forgot your password?
+                </Button>
+              </div>
             </div>
           </form>
         </div>

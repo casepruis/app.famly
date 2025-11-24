@@ -53,6 +53,7 @@ import { motion } from "framer-motion";
 import { useLanguage } from "@/components/common/LanguageProvider";
 import { useToast } from "@/components/ui/use-toast";
 import { format, parseISO } from "date-fns";
+import { getDateFromISO, getTimeFromISO } from "@/utils/timezone";
 import { Card, CardContent } from "@/components/ui/card";
 import { Calendar, Tag, Users, Home } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -161,18 +162,24 @@ const EventListItem = ({ event, familyMembers, onEdit, onDelete }) => {
 
       <Card>
         <CardContent className="p-4 flex items-start gap-4">
-          <div className="flex flex-col items-center justify-center text-center w-20">
-            <span className="text-sm font-semibold text-red-600">{format(parseISO(event.start_time), 'MMM')}</span>
-            <span className="text-3xl font-bold text-gray-800">{format(parseISO(event.start_time), 'd')}</span>
-            <span className="text-xs text-gray-500">{format(parseISO(event.start_time), 'yyyy')}</span>
-          </div>
+          {(() => {
+            const localDate = getDateFromISO(event.start_time);
+            const parsedDate = new Date(localDate + 'T12:00:00'); // Use noon to avoid timezone edge cases for date display
+            return (
+              <div className="flex flex-col items-center justify-center text-center w-20">
+                <span className="text-sm font-semibold text-red-600">{format(parsedDate, 'MMM')}</span>
+                <span className="text-3xl font-bold text-gray-800">{format(parsedDate, 'd')}</span>
+                <span className="text-xs text-gray-500">{format(parsedDate, 'yyyy')}</span>
+              </div>
+            );
+          })()}
           <div className="flex-1 border-l pl-4">
             <h3 className="font-bold text-gray-900">{event.title}</h3>
             <p className="text-sm text-gray-600">{event.description}</p>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs text-gray-500">
               <div className="flex items-center gap-1.5">
                 <Calendar className="w-3 h-3" />
-                <span>{format(parseISO(event.start_time), 'p')} - {format(parseISO(event.end_time), 'p')}</span>
+                <span>{getTimeFromISO(event.start_time)} - {getTimeFromISO(event.end_time)}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <CategoryIcon className="w-3 h-3" />
