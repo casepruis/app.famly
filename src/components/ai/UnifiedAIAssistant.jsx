@@ -10,8 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { useLanguage } from "@/components/common/LanguageProvider";
 import { InvokeLLM } from '@/api/integrations';
-import { Task, ScheduleEvent, WishlistItem, ChatMessage, Conversation } from '@/api/entities';
+import { Task, ScheduleEvent, WishlistItem, ChatMessage, Conversation, fetchWithAuth } from '@/api/entities';
 import { combineDateTimeToISO } from '@/utils/timezone';
+import { detectLanguage, getLanguageName, shouldPromptLanguageSwitch } from '@/utils/languageDetection';
 import TasksReviewer from '../chat/TasksReviewer';
 import VacationEventsReview from '../chat/VacationEventsReview';
 
@@ -51,34 +52,37 @@ function fromLocalInputValue(localValue) {
 
 // Convert AI response event payload to use proper timezone-aware datetimes
 const convertEventPayloadTimezone = (payload, familyMembers = []) => {
-  console.log('🌍 convertEventPayloadTimezone called with:', payload);
   const converted = { ...payload };
   
   // Convert start_time if it exists
   if (converted.start_time && typeof converted.start_time === 'string') {
-    console.log('🌍 Processing start_time:', converted.start_time);
-    // Extract date and time components from any datetime format
-    const match = converted.start_time.match(/^(\d{4}-\d{2}-\d{2})T?(\d{2}:\d{2})/);
-    if (match) {
-      const [, date, time] = match;
-      // Always convert: AI often treats user's local time as UTC incorrectly
-      const originalTime = converted.start_time;
-      converted.start_time = combineDateTimeToISO(date, time);
-      console.log(`🌍 Converted start_time: ${originalTime} → ${converted.start_time}`);
+    // Skip conversion if already in UTC format (has Z or timezone offset)
+    if (/[zZ]|[+\-]\d{2}:\d{2}$/.test(converted.start_time)) {
+      // Already in UTC format, no conversion needed
+    } else {
+      // Extract date and time components from any datetime format
+      const match = converted.start_time.match(/^(\d{4}-\d{2}-\d{2})T?(\d{2}:\d{2})/);
+      if (match) {
+        const [, date, time] = match;
+        // Convert: AI often treats user's local time as UTC incorrectly
+        converted.start_time = combineDateTimeToISO(date, time);
+      }
     }
   }
   
   // Convert end_time if it exists
   if (converted.end_time && typeof converted.end_time === 'string') {
-    console.log('🌍 Processing end_time:', converted.end_time);
-    // Extract date and time components from any datetime format
-    const match = converted.end_time.match(/^(\d{4}-\d{2}-\d{2})T?(\d{2}:\d{2})/);
-    if (match) {
-      const [, date, time] = match;
-      // Always convert: AI often treats user's local time as UTC incorrectly
-      const originalTime = converted.end_time;
-      converted.end_time = combineDateTimeToISO(date, time);
-      console.log(`🌍 Converted end_time: ${originalTime} → ${converted.end_time}`);
+    // Skip conversion if already in UTC format (has Z or timezone offset)
+    if (/[zZ]|[+\-]\d{2}:\d{2}$/.test(converted.end_time)) {
+      // Already in UTC format, no conversion needed
+    } else {
+      // Extract date and time components from any datetime format
+      const match = converted.end_time.match(/^(\d{4}-\d{2}-\d{2})T?(\d{2}:\d{2})/);
+      if (match) {
+        const [, date, time] = match;
+        // Convert: AI often treats user's local time as UTC incorrectly
+        converted.end_time = combineDateTimeToISO(date, time);
+      }
     }
   }
   
@@ -131,13 +135,10 @@ const convertEventPayloadTimezone = (payload, familyMembers = []) => {
     console.log(`🌍 Final family member IDs: ${JSON.stringify(originalIds)} → ${JSON.stringify(converted.family_member_ids)}`);
   }
   
-  console.log('🌍 convertEventPayloadTimezone returning:', converted);
-  
   // FINAL STEP: Ensure family_member_ids reflects the final assignment choice
   // If assigned_to was set by user interaction, use that as the source of truth
   if (converted.assigned_to !== undefined && Array.isArray(converted.assigned_to)) {
     converted.family_member_ids = [...converted.assigned_to];
-    console.log(`🌍 Final: using assigned_to as family_member_ids:`, converted.family_member_ids);
   }
   
   return converted;
@@ -189,7 +190,7 @@ function resolveTargetMember(messageText, familyMembers, currentUserMember) {
 /** ===================== Component ===================== */
 
 export default function UnifiedAIAssistant({ conversationContext, allFamilyMembers = [], user, onUpdate }) {
-  const { t, currentLanguage } = useLanguage();
+  const { t, currentLanguage, updateUserLanguage } = useLanguage();
   const [inputValue, setInputValue] = useState('');
   const STORAGE_KEY = 'famlyai_ai_conversation';
   const [conversation, setConversation] = useState(() => {
@@ -200,6 +201,7 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
   });
   const [isProcessing, setIsProcessing] = useState(false);
   const [pendingAction, setPendingAction] = useState(null); // {action_type, action_payload}
+  const [languageMismatch, setLanguageMismatch] = useState(null); // {detectedLang, userMessage}
   const conversationEndRef = useRef(null);
 
   // persist + autoscroll
@@ -308,20 +310,60 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
     }
   };
 
-  /** ----------------- Sending flow ----------------- */
-  const handleSend = async (messageText) => {
-    if (isProcessing || !messageText?.trim()) return;
-
-    setPendingAction(null);
+  /** ----------------- Language handling ----------------- */
+  const handleLanguageChoice = async (choice) => {
+    if (!languageMismatch) return;
+    
+    const messageText = languageMismatch.userMessage;
+    const detectedLang = languageMismatch.detectedLang;
+    let languageToUse = currentLanguage;
+    
+    if (choice === 'detected') {
+      // Use detected language for this message only
+      languageToUse = detectedLang;
+    } else if (choice === 'preferred') {
+      // Use current preferred language
+      languageToUse = currentLanguage;
+    } else if (choice === 'change') {
+      // Change user's preferred language permanently
+      try {
+        // Update the language via the language context
+        await updateUserLanguage(detectedLang);
+        languageToUse = detectedLang;
+        
+        // Show confirmation message after processing
+        setTimeout(() => {
+          setConversation(prev => ([
+            ...prev,
+            { 
+              role: 'assistant', 
+              content: `Your preferred language has been changed to ${getLanguageName(detectedLang, detectedLang)}.`
+            }
+          ]));
+        }, 1000);
+      } catch (error) {
+        console.error('Error updating language preference:', error);
+        languageToUse = detectedLang; // Fallback to detected language
+      }
+    }
+    
+    setLanguageMismatch(null);
+    
+    // Add user message to conversation
     const userMsg = { role: 'user', content: messageText };
     setConversation(prev => [...prev, userMsg]);
-    setInputValue('');
     setIsProcessing(true);
+    
+    console.log('🌐 Processing with language:', languageToUse);
+    
+    // Continue with the regular processing but with specified language
+    await processMessageWithLanguage(messageText, languageToUse);
+  };
 
+  const processMessageWithLanguage = async (messageText, overrideLanguage = null) => {
     try {
       const familyMembers = Array.isArray(allFamilyMembers) ? allFamilyMembers : [];
       const currentUserMember = user ? familyMembers.find(m => m.user_id === user.id) : null;
-      const familyMemberInfo = familyMembers.map(m => ({ id: m.id, name: m.name }));
       const familyId = user?.family_id || null;
 
       if (!familyId) {
@@ -333,7 +375,9 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
         return;
       }
 
-      // Build conversation history and context (like ChatWindow)
+      // Build conversation history and context
+      // Include the new user message in the history like the working version
+      const userMsg = { role: 'user', content: messageText };
       const llmHistory = [...conversation, userMsg].map(msg => {
         return `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`;
       }).join('\n');
@@ -353,9 +397,13 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
       const tz = browserTz || "UTC";
       const nowIso = new Date().toISOString();
 
+      // Use override language or current language
+      const languageToUse = overrideLanguage || currentLanguage;
+      const languageName = languageToUse === 'nl' ? 'Dutch' : 'English';
+
       // STRONGER PROMPT: Always extract actionable items if present, never return empty arrays if user asks for something actionable
       const response = await InvokeLLM({
-        prompt: `You are famly.ai, a helpful family assistant.\n\nAnalyse the conversation and ALWAYS extract actionable items (tasks, events, wishlist) from the user's last message if any requests, wishes, or to-dos are present.\n- If details are missing, make reasonable assumptions.\n- If the user asks for something actionable, NEVER return empty arrays.\n- If nothing actionable is present, return empty arrays.\n\nProvide:\n- a SHORT summary\n- concrete TASKS and EVENTS to create now\n- optional WISHLIST items\n\nRules:\n- Respond ONLY with JSON (no markdown).\n- Write all human fields in the user's language.\n- Use ONLY existing family member IDs from the list.\n- When assigning to "me" or the current user, use the Current User Family Member ID.\n- Prefer near dates/times (7–14 days), not the past.\n- 24h notation, ISO without timezone (YYYY-MM-DDTHH:MM:SS).\n- If vague: suggest small, certain actions.\n\nNow (local time): ${nowIso} (${tz}).\n\nContext:\nCHAT LOG:\n---\n${llmHistory}\n---\n\nFamily Members (IDs usable): ${JSON.stringify(safeMembers, null, 2)}\nCurrent User Family Member ID: ${currentUserFamilyMemberId || user?.id}\nFamily ID: ${currentFamilyId}\n\nReturn exact JSON:\n{\n  "summary": "short summary",\n  "tasks": [\n    {\n      "title": "string",\n      "description": "string (optional)",\n      "assigned_to": ["<family_member_id>", "..."],\n      "family_id": "${currentFamilyId}",\n      "due_date": "YYYY-MM-DDTHH:MM:SS (optional)"\n    }\n  ],\n  "events": [\n    {\n      "title": "string",\n      "start_time": "YYYY-MM-DDTHH:MM:SS",\n      "end_time": "YYYY-MM-DDTHH:MM:SS",\n      "family_member_ids": ["<family_member_id>", "..."],\n      "family_id": "${currentFamilyId}",\n      "location": "string (optional)"\n    }\n  ],\n  "wishlist_items": [\n    { "name": "string", "url": "string (optional)", "family_member_id": "<family_member_id>" }\n  ]\n}`,
+        prompt: `You are famly.ai, a helpful family assistant.\n\nAnalyse the conversation and ALWAYS extract actionable items (tasks, events, wishlist) from the user's last message if any requests, wishes, or to-dos are present.\n- If details are missing, make reasonable assumptions.\n- If the user asks for something actionable, NEVER return empty arrays.\n- If nothing actionable is present, return empty arrays.\n\nProvide:\n- a SHORT summary\n- concrete TASKS and EVENTS to create now\n- optional WISHLIST items\n\nRules:\n- Respond ONLY with JSON (no markdown).\n- Write ALL text fields (summary, titles, descriptions) in ${languageName}.\n- Use ONLY existing family member IDs from the list.\n- When assigning to "me" or the current user, use the Current User Family Member ID.\n- Prefer near dates/times (7–14 days), not the past.\n- 24h notation, ISO without timezone (YYYY-MM-DDTHH:MM:SS).\n- If vague: suggest small, certain actions.\n\nNow (local time): ${nowIso} (${tz}).\nUser's preferred language: ${languageName}\n\nContext:\nCHAT LOG:\n---\n${llmHistory}\n---\n\nFamily Members (IDs usable): ${JSON.stringify(safeMembers, null, 2)}\nCurrent User Family Member ID: ${currentUserFamilyMemberId || user?.id}\nFamily ID: ${currentFamilyId}\n\nReturn exact JSON:\n{\n  "summary": "short summary",\n  "tasks": [\n    {\n      "title": "string",\n      "description": "string (optional)",\n      "assigned_to": ["<family_member_id>", "..."],\n      "family_id": "${currentFamilyId}",\n      "due_date": "YYYY-MM-DDTHH:MM:SS (optional)"\n    }\n  ],\n  "events": [\n    {\n      "title": "string",\n      "start_time": "YYYY-MM-DDTHH:MM:SS",\n      "end_time": "YYYY-MM-DDTHH:MM:SS",\n      "family_member_ids": ["<family_member_id>", "..."],\n      "family_id": "${currentFamilyId}",\n      "location": "string (optional)"\n    }\n  ],\n  "wishlist_items": [\n    { "name": "string", "url": "string (optional)", "family_member_id": "<family_member_id>" }\n  ]\n}`,
         response_json_schema: {
           type: "object",
           properties: {
@@ -370,16 +418,12 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
       });
 
       const data = response?.data || response || {};
-      const summary = data.summary ?? "AI suggesties";
+      const summary = data.summary ?? "AI suggestions";
       const tasks = data.tasks ?? [];
       const events = data.events ?? [];
       const wishlist = data.wishlist_items ?? [];
 
-      // Fallback: If user asked for something actionable but LLM returned nothing, show a helpful message
-      const userAskedForAction = /\b(task|event|afspraak|todo|to-do|wishlist|verlanglijst|add|maak|create|plan|schedule|show|toon|add|voeg toe|wens|wish|willen|wil|moet|must|should|zou moeten|kan|could|can|please|alsjeblieft|remind|herinner|remember|buy|koop|kopen|organiseer|organize|arrange|regel|fix|done|klaar|af|finish|voltooi|complete)\b/i.test(messageText);
-      const hasActions = (tasks && tasks.length) || (events && events.length) || (wishlist && wishlist.length);
-
-      // Always show the summary message (no hasAction here)
+      // Always show the summary message
       setConversation(prev => ([
         ...prev,
         { role: 'assistant', content: summary }
@@ -391,6 +435,8 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
         ...convertEventPayloadTimezone(e, allFamilyMembers),
       }));
 
+      const hasActions = (tasks && tasks.length) || (events && events.length) || (wishlist && wishlist.length);
+      
       if (hasActions) {
         setPendingAction({
           action_payload: {
@@ -399,89 +445,53 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
             items: wishlist,
           }
         });
-      } else if (userAskedForAction) {
-        setConversation(prev => ([
-          ...prev,
-          { role: 'assistant', content: t('noActionsFound') || "I couldn't extract any actionable items from your message. Please rephrase or add more details." }
-        ]));
       }
-
-      // For array-based flow (tasks/events/wishlist), always show review panel if actionable items exist
-      // Only use the switch for legacy single-action flows (action_type)
-      // This ensures the review panel appears and actions can be confirmed/applied
-      if (!hasActions && data.action_type) {
-        // Only fallback to legacy switch if no array-based actions
-        const type = data.action_type;
-        let aiResponse = null;
-        let nextPending = null;
-        let hasAction = false;
-        const autoApply = true;
-        switch (type) {
-          case 'convert_event_to_task': {
-            const payload = data.action_payload || {};
-            if (payload.event_id) {
-              await executeAction({ action_type: 'convert_event_to_task', action_payload: payload });
-            } else {
-              aiResponse = t('aiError') || 'Missing event id.';
-            }
-            break;
-          }
-          case 'convert_task_to_event': {
-            const payload = data.action_payload || {};
-            if (payload.task_id) {
-              await executeAction({ action_type: 'convert_task_to_event', action_payload: payload });
-            } else {
-              aiResponse = t('aiError') || 'Missing task id.';
-            }
-            break;
-          }
-          case 'clarify':
-            aiResponse = data.clarification_question;
-            break;
-          case 'chat':
-          default:
-            aiResponse = data.response;
-            // Persist AI chat suggestion into a conversation if present
-            if (conversationContext?.type === 'chat' && user?.family_id && aiResponse) {
-              try {
-                const aiMember = allFamilyMembers.find(m => m.role === 'ai_assistant');
-                if (aiMember) {
-                  await ChatMessage.create({
-                    conversation_id: conversationContext.conversationId,
-                    sender_id: aiMember.id,
-                    content: aiResponse,
-                    message_type: 'ai_suggestion'
-                  });
-                  await Conversation.update(conversationContext.conversationId, {
-                    last_message_preview: aiResponse.substring(0, 100),
-                    last_message_timestamp: new Date().toISOString()
-                  });
-                }
-              } catch (e) {
-                // non-fatal
-                console.warn('Failed to persist AI message:', e);
-              }
-            }
-            break;
-        }
-        setPendingAction(null);
-        if (aiResponse) {
-          setConversation(prev => [
-            ...prev,
-            { role: 'assistant', content: aiResponse, hasAction, action: nextPending || null }
-          ]);
-        }
-      }
-
     } catch (error) {
-      console.error("Error processing message:", error);
-      setConversation(prev => [
+      console.error('Error processing message:', error);
+      setConversation(prev => ([
         ...prev,
-        { role: 'assistant', content: t('aiError') || "Sorry, I had trouble with that. Could you rephrase?" }
-      ]);
+        { role: 'assistant', content: t('aiError') || "Sorry, I had trouble processing that. Could you try again?" }
+      ]));
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  /** ----------------- Sending flow ----------------- */
+  const handleSend = async (messageText) => {
+    if (isProcessing || !messageText?.trim()) return;
+
+    setPendingAction(null);
+    setLanguageMismatch(null);
+
+    // Detect language of user input using LLM
+    const detectedLang = await detectLanguage(messageText);
+    console.log('🌐 Language detection:', {
+      input: messageText,
+      detected: detectedLang,
+      userPreference: currentLanguage
+    });
+
+    // Check for language mismatch and prompt user
+    if (shouldPromptLanguageSwitch(detectedLang, currentLanguage)) {
+      console.log('🌐 Language mismatch detected, showing prompt');
+      setLanguageMismatch({
+        detectedLang,
+        userMessage: messageText,
+        detectedLangName: getLanguageName(detectedLang, currentLanguage),
+        preferredLangName: getLanguageName(currentLanguage, currentLanguage)
+      });
+      return; // Stop processing, wait for user choice
+    }
+
+    // Add user message to conversation
+    const userMsg = { role: 'user', content: messageText };
+    setConversation(prev => [...prev, userMsg]);
+    setInputValue('');
+    setIsProcessing(true);
+
+    // Process with user's current language preference
+    await processMessageWithLanguage(messageText);
   };
 
   const handleKeyDown = (e) => {
@@ -862,6 +872,73 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
           {t('clearChat') || 'Clear chat'}
         </Button>
       </div>
+
+      {/* Language Mismatch Dialog */}
+      {languageMismatch && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mx-4 mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg"
+        >
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+              <Bot className="w-5 h-5 text-amber-600" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm text-amber-800 mb-3">
+                {currentLanguage === 'nl' 
+                  ? `Ik heb gedetecteerd dat je in het ${languageMismatch.detectedLangName} schrijft, maar je voorkeurstaal is ingesteld op ${languageMismatch.preferredLangName}. Hoe wil je doorgaan?`
+                  : `I detected you're writing in ${languageMismatch.detectedLangName}, but your preferred language is set to ${languageMismatch.preferredLangName}. How would you like to proceed?`
+                }
+              </p>
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => handleLanguageChoice('detected')}
+                    className="bg-amber-600 hover:bg-amber-700 text-white"
+                  >
+                    {currentLanguage === 'nl' 
+                      ? `Antwoord in het ${languageMismatch.detectedLangName} (eenmalig)`
+                      : `Respond in ${languageMismatch.detectedLangName} (this time)`
+                    }
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleLanguageChoice('preferred')}
+                  >
+                    {currentLanguage === 'nl' 
+                      ? `Gebruik ${languageMismatch.preferredLangName}`
+                      : `Use ${languageMismatch.preferredLangName}`
+                    }
+                  </Button>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleLanguageChoice('change')}
+                    className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200"
+                  >
+                    {currentLanguage === 'nl' 
+                      ? `Wijzig voorkeur naar ${languageMismatch.detectedLangName}`
+                      : `Change preference to ${languageMismatch.detectedLangName}`
+                    }
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setLanguageMismatch(null)}
+                  >
+                    {t('cancel') || 'Cancel'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      )}
 
       {/* Composer */}
       <div className="border-t p-2 sm:p-4 bg-white flex-shrink-0">

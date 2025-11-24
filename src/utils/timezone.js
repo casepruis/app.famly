@@ -117,16 +117,6 @@ export const combineDateTimeToISO = (dateStr, timeStr, userTimezone = null) => {
     // Create the datetime string 
     const dateTimeStr = `${dateStr}T${time}:00`;
     
-    // The issue: new Date(dateTimeStr) treats this as LOCAL time in browser's timezone
-    // But we want to treat it as if the user explicitly meant their local time
-    // and convert it to proper UTC for storage
-    
-    // For Amsterdam (CET = UTC+1), if user enters 12:30:
-    // - They mean 12:30 Amsterdam time
-    // - This should be stored as 11:30 UTC
-    // - new Date('2025-11-24T12:30:00') in Amsterdam browser creates 12:30 CET
-    // - .toISOString() converts that to 11:30 UTC ✓
-    
     const localDate = new Date(dateTimeStr);
     const isoString = localDate.toISOString();
     
