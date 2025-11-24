@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { useLanguage } from "@/components/common/LanguageProvider";
 import { InvokeLLM } from '@/api/integrations';
 import { Task, ScheduleEvent, WishlistItem, ChatMessage, Conversation } from '@/api/entities';
+import { combineDateTimeToISO } from '@/utils/timezone';
 import TasksReviewer from '../chat/TasksReviewer';
 import VacationEventsReview from '../chat/VacationEventsReview';
 
@@ -47,6 +48,100 @@ function fromLocalInputValue(localValue) {
   if (!localValue) return "";
   return localValue.length === 16 ? `${localValue}:00` : localValue;
 }
+
+// Convert AI response event payload to use proper timezone-aware datetimes
+const convertEventPayloadTimezone = (payload, familyMembers = []) => {
+  console.log('🌍 convertEventPayloadTimezone called with:', payload);
+  const converted = { ...payload };
+  
+  // Convert start_time if it exists
+  if (converted.start_time && typeof converted.start_time === 'string') {
+    console.log('🌍 Processing start_time:', converted.start_time);
+    // Extract date and time components from any datetime format
+    const match = converted.start_time.match(/^(\d{4}-\d{2}-\d{2})T?(\d{2}:\d{2})/);
+    if (match) {
+      const [, date, time] = match;
+      // Always convert: AI often treats user's local time as UTC incorrectly
+      const originalTime = converted.start_time;
+      converted.start_time = combineDateTimeToISO(date, time);
+      console.log(`🌍 Converted start_time: ${originalTime} → ${converted.start_time}`);
+    }
+  }
+  
+  // Convert end_time if it exists
+  if (converted.end_time && typeof converted.end_time === 'string') {
+    console.log('🌍 Processing end_time:', converted.end_time);
+    // Extract date and time components from any datetime format
+    const match = converted.end_time.match(/^(\d{4}-\d{2}-\d{2})T?(\d{2}:\d{2})/);
+    if (match) {
+      const [, date, time] = match;
+      // Always convert: AI often treats user's local time as UTC incorrectly
+      const originalTime = converted.end_time;
+      converted.end_time = combineDateTimeToISO(date, time);
+      console.log(`🌍 Converted end_time: ${originalTime} → ${converted.end_time}`);
+    }
+  }
+  
+  // Fix family member assignment: convert user emails to family member IDs
+  if (converted.family_member_ids !== undefined) {
+    const originalIds = converted.family_member_ids;
+    
+    // Ensure it's an array
+    const idsArray = Array.isArray(originalIds) ? originalIds : [];
+    
+    // Convert user emails/IDs to family member IDs
+    const validMemberIds = [];
+    
+    console.log(`🌍 Processing family_member_ids:`, originalIds);
+    console.log(`🌍 Available family members:`, familyMembers.map(m => ({id: m.id, name: m.name, user_id: m.user_id})));
+    
+    for (const id of idsArray) {
+      if (!id || typeof id !== 'string' || id.trim() === '') continue;
+      
+      // Check if it's already a valid family member ID
+      const existingMember = familyMembers.find(m => m.id === id);
+      if (existingMember) {
+        validMemberIds.push(id);
+        console.log(`🌍 Valid family member ID: ${id} (${existingMember.name})`);
+        continue;
+      }
+      
+      // Check if it's a user email that needs conversion to family member ID
+      const memberByUserId = familyMembers.find(m => m.user_id === id);
+      if (memberByUserId) {
+        validMemberIds.push(memberByUserId.id);
+        console.log(`🌍 Converted user email to family member: ${id} → ${memberByUserId.id} (${memberByUserId.name})`);
+        continue;
+      }
+      
+      console.log(`🌍 Invalid member ID ignored: ${id}`);
+    }
+    
+    // Set the converted IDs (empty array shows "All Family")
+    converted.family_member_ids = validMemberIds;
+    
+    // IMPORTANT: Only set assigned_to if it doesn't already exist (preserve user choices)
+    if (converted.assigned_to === undefined) {
+      converted.assigned_to = validMemberIds;
+      console.log(`🌍 Set assigned_to to family_member_ids:`, validMemberIds);
+    } else {
+      console.log(`🌍 Preserved existing assigned_to:`, converted.assigned_to);
+    }
+    
+    console.log(`🌍 Final family member IDs: ${JSON.stringify(originalIds)} → ${JSON.stringify(converted.family_member_ids)}`);
+  }
+  
+  console.log('🌍 convertEventPayloadTimezone returning:', converted);
+  
+  // FINAL STEP: Ensure family_member_ids reflects the final assignment choice
+  // If assigned_to was set by user interaction, use that as the source of truth
+  if (converted.assigned_to !== undefined && Array.isArray(converted.assigned_to)) {
+    converted.family_member_ids = [...converted.assigned_to];
+    console.log(`🌍 Final: using assigned_to as family_member_ids:`, converted.family_member_ids);
+  }
+  
+  return converted;
+};
 
 function formatDateTimeEU(value, localeHint) {
   const locale = localeHint || "en-GB";
@@ -140,7 +235,10 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
           break;
         }
         case 'create_event': {
-          const payload = { ...action_payload };
+          console.log('🔧 DEBUG: create_event action triggered');
+          console.log('🔧 DEBUG: Raw action_payload:', action_payload);
+          const payload = convertEventPayloadTimezone({ ...action_payload }, allFamilyMembers);
+          console.log('🔧 DEBUG: After conversion:', payload);
           if (!payload.family_id) payload.family_id = user?.family_id;
           await ScheduleEvent.create(payload);
           setConversation(prev => [...prev, { role: 'assistant', content: t('eventCreated') || 'Event created!' }]);
@@ -149,7 +247,7 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
         case 'create_multiple_events': {
           const events = (action_payload?.events || []).filter(Boolean);
           for (const ev of events) {
-            const payload = { ...ev };
+            const payload = convertEventPayloadTimezone({ ...ev }, allFamilyMembers);
             if (!payload.family_id) payload.family_id = user?.family_id;
             await ScheduleEvent.create(payload);
           }
@@ -243,14 +341,21 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
       const currentFamilyId = user?.family_id;
       const safeMembers = allFamilyMembers
         .filter(m => m.family_id === currentFamilyId)
-        .map(m => ({ id: m.id, name: m.name }));
+        .map(m => ({ id: m.id, name: m.name, user_id: m.user_id }));
+      
+      // Find the current user's family member ID
+      const currentUserFamilyMember = allFamilyMembers.find(m => 
+        m.family_id === currentFamilyId && m.user_id === user?.id
+      );
+      const currentUserFamilyMemberId = currentUserFamilyMember?.id;
+      
       const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const tz = browserTz || "UTC";
       const nowIso = new Date().toISOString();
 
       // STRONGER PROMPT: Always extract actionable items if present, never return empty arrays if user asks for something actionable
       const response = await InvokeLLM({
-        prompt: `You are famly.ai, a helpful family assistant.\n\nAnalyse the conversation and ALWAYS extract actionable items (tasks, events, wishlist) from the user's last message if any requests, wishes, or to-dos are present.\n- If details are missing, make reasonable assumptions.\n- If the user asks for something actionable, NEVER return empty arrays.\n- If nothing actionable is present, return empty arrays.\n\nProvide:\n- a SHORT summary\n- concrete TASKS and EVENTS to create now\n- optional WISHLIST items\n\nRules:\n- Respond ONLY with JSON (no markdown).\n- Write all human fields in the user's language.\n- Use ONLY existing family member IDs from the list.\n- Prefer near dates/times (7–14 days), not the past.\n- 24h notation, ISO without timezone (YYYY-MM-DDTHH:MM:SS).\n- If vague: suggest small, certain actions.\n\nNow (local time): ${nowIso} (${tz}).\n\nContext:\nCHAT LOG:\n---\n${llmHistory}\n---\n\nFamily Members (IDs usable): ${JSON.stringify(safeMembers, null, 2)}\nCurrent User ID: ${user?.id}\nFamily ID: ${currentFamilyId}\n\nReturn exact JSON:\n{\n  "summary": "short summary",\n  "tasks": [\n    {\n      "title": "string",\n      "description": "string (optional)",\n      "assigned_to": ["<family_member_id>", "..."],\n      "family_id": "${currentFamilyId}",\n      "due_date": "YYYY-MM-DDTHH:MM:SS (optional)"\n    }\n  ],\n  "events": [\n    {\n      "title": "string",\n      "start_time": "YYYY-MM-DDTHH:MM:SS",\n      "end_time": "YYYY-MM-DDTHH:MM:SS",\n      "family_member_ids": ["<family_member_id>", "..."],\n      "family_id": "${currentFamilyId}",\n      "location": "string (optional)"\n    }\n  ],\n  "wishlist_items": [\n    { "name": "string", "url": "string (optional)", "family_member_id": "<family_member_id>" }\n  ]\n}`,
+        prompt: `You are famly.ai, a helpful family assistant.\n\nAnalyse the conversation and ALWAYS extract actionable items (tasks, events, wishlist) from the user's last message if any requests, wishes, or to-dos are present.\n- If details are missing, make reasonable assumptions.\n- If the user asks for something actionable, NEVER return empty arrays.\n- If nothing actionable is present, return empty arrays.\n\nProvide:\n- a SHORT summary\n- concrete TASKS and EVENTS to create now\n- optional WISHLIST items\n\nRules:\n- Respond ONLY with JSON (no markdown).\n- Write all human fields in the user's language.\n- Use ONLY existing family member IDs from the list.\n- When assigning to "me" or the current user, use the Current User Family Member ID.\n- Prefer near dates/times (7–14 days), not the past.\n- 24h notation, ISO without timezone (YYYY-MM-DDTHH:MM:SS).\n- If vague: suggest small, certain actions.\n\nNow (local time): ${nowIso} (${tz}).\n\nContext:\nCHAT LOG:\n---\n${llmHistory}\n---\n\nFamily Members (IDs usable): ${JSON.stringify(safeMembers, null, 2)}\nCurrent User Family Member ID: ${currentUserFamilyMemberId || user?.id}\nFamily ID: ${currentFamilyId}\n\nReturn exact JSON:\n{\n  "summary": "short summary",\n  "tasks": [\n    {\n      "title": "string",\n      "description": "string (optional)",\n      "assigned_to": ["<family_member_id>", "..."],\n      "family_id": "${currentFamilyId}",\n      "due_date": "YYYY-MM-DDTHH:MM:SS (optional)"\n    }\n  ],\n  "events": [\n    {\n      "title": "string",\n      "start_time": "YYYY-MM-DDTHH:MM:SS",\n      "end_time": "YYYY-MM-DDTHH:MM:SS",\n      "family_member_ids": ["<family_member_id>", "..."],\n      "family_id": "${currentFamilyId}",\n      "location": "string (optional)"\n    }\n  ],\n  "wishlist_items": [\n    { "name": "string", "url": "string (optional)", "family_member_id": "<family_member_id>" }\n  ]\n}`,
         response_json_schema: {
           type: "object",
           properties: {
@@ -283,7 +388,7 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
       const eventsWithSelection = (events || []).map((e, idx) => ({
         id: e.id || `event-${Date.now()}-${idx}`,
         selected: true,
-        ...e,
+        ...convertEventPayloadTimezone(e, allFamilyMembers),
       }));
 
       if (hasActions) {
@@ -701,7 +806,14 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
                       const { tasks = [], events = [], items = [] } = confirmed;
                       try {
                         if (tasks && tasks.length) await Task.bulkCreate(tasks);
-                        if (events && events.length) await ScheduleEvent.bulkCreate(events);
+                        if (events && events.length) {
+                          console.log('🔧 DEBUG: bulkCreate events triggered');
+                          console.log('🔧 DEBUG: Raw events array:', events);
+                          // Apply timezone conversion to all events
+                          const convertedEvents = events.map(event => convertEventPayloadTimezone(event, allFamilyMembers));
+                          console.log('🔧 DEBUG: After bulk conversion:', convertedEvents);
+                          await ScheduleEvent.bulkCreate(convertedEvents);
+                        }
                         if (items && items.length) await WishlistItem.bulkCreate(items);
                         if ((tasks && tasks.length) || (events && events.length) || (items && items.length)) {
                           setConversation(prev => ([...prev, { role: 'assistant', content: 'Items added!' }]));
