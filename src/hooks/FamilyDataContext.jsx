@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
-import { User, Family, FamilyMember, ScheduleEvent, Task } from "@/api/entities";
+import { User, Family, FamilyMember, ScheduleEvent, Task } from '@/api/entities';
+import { AIAgent } from '@/api/aiAgent';
+import { toast } from "@/components/ui/use-toast";
 
 const FamilyDataContext = createContext(null);
 
@@ -9,6 +11,7 @@ export function FamilyDataProvider({ children }) {
   const [members, setMembers] = useState([]);
   const [events, setEvents] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [planningInsights, setPlanningInsights] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [tokenChecked, setTokenChecked] = useState(false);
@@ -23,6 +26,31 @@ export function FamilyDataProvider({ children }) {
     }
   }, [localStorage.getItem('famlyai_token')]);
 
+  // Async AI agent analysis trigger
+  const triggerAIAgentAnalysis = async (eventData) => {
+    try {
+      if (!family?.id) return;
+      
+      console.log('[AI-AGENT] Triggering analysis for event:', eventData.title);
+      
+      // Call AI agent asynchronously - don't block UI
+      setTimeout(async () => {
+        try {
+          const analysis = await AIAgent.analyzeEvent(family.id, eventData);
+          console.log('[AI-AGENT] Analysis complete:', analysis);
+          
+          // The analysis results will come back via WebSocket
+          // so we don't need to handle them here
+        } catch (error) {
+          console.log('[AI-AGENT] Analysis failed (non-blocking):', error);
+        }
+      }, 100); // Small delay to avoid blocking the UI
+      
+    } catch (error) {
+      console.log('[AI-AGENT] Analysis setup failed:', error);
+    }
+  };
+
   const loadData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -35,6 +63,7 @@ export function FamilyDataProvider({ children }) {
         setMembers([]);
         setEvents([]);
         setTasks([]);
+        setPlanningInsights([]);
         setIsLoading(false);
         return;
       }
@@ -45,6 +74,7 @@ export function FamilyDataProvider({ children }) {
         ScheduleEvent.filter({ family_id: familyId }, "-start_time", 1000).catch(() => []),
         Task.filter({ family_id: familyId }, "due_date", 1000).catch(() => []),
       ]);
+      console.log('[FamilyDataContext] 🔍 [API-BATCH] Loaded all family data in batch');
       console.log('[FamilyDataContext] Loaded family:', familyData);
       console.log('[FamilyDataContext] Loaded members:', membersData);
       setFamily(familyData);
@@ -74,6 +104,7 @@ export function FamilyDataProvider({ children }) {
         const { type, payload } = JSON.parse(event.data);
         // --- Events ---
         if (["schedule_event_created", "schedule_event_updated", "schedule_event_deleted"].includes(type)) {
+          console.log('🔍 [WS] Schedule event update:', type, payload?.id);
           setEvents(prevEvents => {
             if (type === "schedule_event_created") {
               console.log('[WS][DEBUG] schedule_event_created received. Payload:', payload);
@@ -86,6 +117,10 @@ export function FamilyDataProvider({ children }) {
               }
               const next = [...prevEvents, payload];
               console.log('[WS][DEBUG] Events after create:', next);
+              
+              // Trigger AI agent analysis asynchronously
+              triggerAIAgentAnalysis(payload);
+              
               return next;
             }
             if (type === "schedule_event_updated") {
@@ -103,6 +138,7 @@ export function FamilyDataProvider({ children }) {
         }
         // --- Tasks ---
         if (["task_created", "task_updated", "task_deleted"].includes(type)) {
+          console.log('🔍 [WS] Task update:', type, payload?.id);
           setTasks(prevTasks => {
             if (type === "task_created") {
               if (prevTasks.some(t => t.id === payload.id)) return prevTasks;
@@ -138,12 +174,33 @@ export function FamilyDataProvider({ children }) {
             return prevMembers;
           });
         }
+        // --- Planning Agent Insights ---
+        if (type === "agent_insight_created") {
+          console.log('[WS] agent_insight_created received:', payload);
+          const { insights = [], insight_count = 0, summary = '' } = payload;
+          
+          // Update insights state
+          setPlanningInsights(prev => {
+            const newInsights = insights.filter(insight => !prev.some(p => p.id === insight.id));
+            return [...prev, ...newInsights];
+          });
+          
+          // Show notification
+          if (insight_count > 0) {
+            toast({
+              title: `🤖 Planning Agent Insights`,
+              description: `Found ${insight_count} new insights. Check the Agent page for details.`,
+              duration: 8000,
+            });
+          }
+        }
         // Always call loadData to ensure consistency
         if ([
           "family_member_created","family_member_updated","family_member_deleted",
           "schedule_event_created","schedule_event_updated","schedule_event_deleted",
           "task_created","task_updated","task_deleted",
-          "wishlist_item_created","wishlist_item_updated","wishlist_item_deleted"
+          "wishlist_item_created","wishlist_item_updated","wishlist_item_deleted",
+          "agent_insight_created"
         ].includes(type)) {
           loadData();
         }
@@ -152,7 +209,12 @@ export function FamilyDataProvider({ children }) {
     ws.addEventListener("message", handler);
     ws.onopen = () => { console.log('[WS][DEBUG] FamilyDataContext WebSocket connected'); };
     ws.onerror = (e) => { console.warn('[WS][DEBUG] FamilyDataContext WebSocket error', e); };
-    ws.onclose = () => { if (!closed) { console.warn('[WS][DEBUG] FamilyDataContext WebSocket closed, reconnecting...'); setTimeout(() => { if (!closed) window.location.reload(); }, 2000); } };
+    ws.onclose = () => { 
+      if (!closed) { 
+        console.warn('[WS][DEBUG] FamilyDataContext WebSocket closed, will attempt reconnection on next data load');
+        // Don't auto-reload page - let it reconnect naturally on next user interaction
+      } 
+    };
     return () => { closed = true; ws.removeEventListener("message", handler); try { ws.close(); } catch {} };
   }, [loadData]);
 
@@ -162,7 +224,7 @@ export function FamilyDataProvider({ children }) {
   }, [tokenChecked, loadData]);
 
   return (
-    <FamilyDataContext.Provider value={{ user, family, members, events, tasks, isLoading, error, reload: loadData }}>
+    <FamilyDataContext.Provider value={{ user, family, members, events, tasks, planningInsights, isLoading, error, reload: loadData }}>
       {children}
     </FamilyDataContext.Provider>
   );

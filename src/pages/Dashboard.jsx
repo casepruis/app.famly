@@ -35,20 +35,21 @@ const useFamlyWebSocket = (reload) => {
       ws.onmessage = (msg) => {
         try {
           const data = JSON.parse(msg.data);
+          // Temporarily disable auto-reload for created events to reduce redundant calls
           if (data && (
-            data.type === 'schedule_event_created' ||
             data.type === 'schedule_event_updated' ||
             data.type === 'schedule_event_deleted' ||
             data.type === 'task_created' ||
             data.type === 'task_updated' ||
             data.type === 'task_deleted')) {
-            reload();
+            // Data updates handled by FamilyDataContext WebSocket - no manual reload needed
+            console.log('🔍 [OPTIMIZATION] Dashboard WebSocket update - no manual reload needed');
           }
         } catch {}
       };
     } catch {}
     return () => { try { ws && ws.close(); } catch {} };
-  }, [reload]);
+  }, []);
 };
 import { useFamilyData } from "@/hooks/FamilyDataContext";
 import { motion } from "framer-motion";
@@ -67,6 +68,7 @@ import AIReviewDialog from "@/components/schedule/AIReviewDialog";
 import { ScheduleEvent } from "@/api/entities";
 import Joyride from "../components/common/Joyride";
 import FunFactCard from "../components/dashboard/FunFactCard";
+import InsightDebugPanel from "../components/InsightDebugPanel";
 
 const tourSteps = (t) => [
     { target: '#weekly-schedule-preview', title: t('weeklySchedule') || 'Weekly Schedule', content: t('tour_weeklySchedule_content') || 'Get a quick overview of your family\'s week at a glance. Click to navigate to the full schedule.' },
@@ -78,16 +80,17 @@ const tourSteps = (t) => [
 
 export default function Dashboard() {
   // All hooks must be called before any early returns
-  const { user, family, members: familyMembers, events, tasks, isLoading, error, reload } = useFamilyData();
-  useFamlyWebSocket(reload);
+  const { user, family, members: familyMembers, events, tasks, isLoading, error } = useFamilyData();
+  // Removed useFamlyWebSocket(reload) - FamilyDataContext handles WebSocket updates
   const [hasError, setHasError] = useState(false);
   const [runTour, setRunTour] = useState(false);
   const [editEvent, setEditEvent] = useState(null);
   const [reviewData, setReviewData] = useState(null);
   const [isReviewDialogOpen, setIsReviewDialogOpen] = useState(false);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState(null);
+  const [isCreatingEvent, setIsCreatingEvent] = useState(false);
   const navigate = useNavigate();
-  const { t } = useLanguage();
+  const { t, currentLanguage } = useLanguage();
   const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -236,6 +239,7 @@ export default function Dashboard() {
       });
       return;
     }
+    setIsCreatingEvent(true);
     try {
       if (editEvent && editEvent.id) {
         await ScheduleEvent.update(editEvent.id, eventData);
@@ -243,7 +247,7 @@ export default function Dashboard() {
         toast({ title: t('eventUpdated'), description: eventData.title, variant: 'success', duration: 5000 });
       } else {
         // Ensure family_id is included for new events
-        const newEvent = { ...eventData, family_id: user.family_id };
+        const newEvent = { ...eventData, family_id: user.family_id, language: currentLanguage };
         console.log('[FamlyAI] Creating event with payload:', newEvent);
         const created = await ScheduleEvent.create(newEvent);
         console.log('[FamlyAI] ScheduleEvent.create response:', created);
@@ -268,6 +272,8 @@ export default function Dashboard() {
     } catch (error) {
       console.error('[FamlyAI] Error in handleProcessSave:', error);
       toast({ title: t('errorSavingEvent'), description: eventData.title, variant: 'destructive', duration: 5000 });
+    } finally {
+      setIsCreatingEvent(false);
     }
   };
   const handleDialogDelete = async (event) => {
@@ -305,10 +311,23 @@ export default function Dashboard() {
               await ScheduleEvent.update(editEvent.id, newEventData);
               toast({ title: t('eventUpdated'), description: newEventData.title, variant: 'success', duration: 5000 });
             } else {
-              await ScheduleEvent.create(newEventData);
+              const createdEvent = await ScheduleEvent.create(newEventData);
+              console.log('🔍 [DASHBOARD] Event created:', createdEvent.title);
               toast({ title: t('eventCreated'), description: newEventData.title, variant: 'success', duration: 5000 });
+              
+              // Trigger AI review dialog for new events - use aiResult from backend response
+              if (createdEvent.aiResult || createdEvent.planningInsights) {
+                setReviewData({
+                  originalEvent: createdEvent,
+                  aiResult: createdEvent.aiResult || { suggestedTasks: [] },  // Use aiResult from backend
+                  planningInsights: createdEvent.planningInsights || [],      // Include planning insights
+                  type: 'event',
+                  isNew: true
+                });
+                setIsReviewDialogOpen(true);
+              }
             }
-            // if (reload) await reload();
+            // WebSocket will handle data updates automatically
             handleDialogClose();
           } catch (error) {
             toast({ title: t('errorSavingEvent'), description: eventData.title, variant: 'destructive', duration: 5000 });
@@ -321,6 +340,64 @@ export default function Dashboard() {
         selectedHour={selectedTimeSlot?.hour}
         userLoaded={!!user && !!user.family_id}
       />
+      
+      {/* AI Review Dialog for insights after event creation */}
+      <AIReviewDialog
+        isOpen={isReviewDialogOpen}
+        onClose={() => {
+          setIsReviewDialogOpen(false);
+          setReviewData(null);
+        }}
+        reviewData={reviewData}
+        onConfirm={async (finalEvent, allTasks) => {
+          console.log('🔍 [DASHBOARD] onConfirm called with:', { finalEvent, allTasks });
+          // Handle task creation from AI suggestions
+          if (allTasks && allTasks.length > 0) {
+            try {
+              console.log('🔍 [DASHBOARD] Creating tasks:', allTasks);
+              
+              // Ensure all tasks have required fields before sending to API
+              const tasksToCreate = allTasks.map(task => ({
+                title: task.title,
+                description: task.description || '',
+                family_id: user.family_id,
+                ai_suggested: task.ai_suggested || true,
+                priority: task.priority || 'medium',
+                due_date: task.due_date,
+                category: task.category || 'family',
+                status: task.status || 'todo',
+                assigned_to: task.assigned_to || [],
+                points: task.points || 0,
+                estimated_duration: task.estimated_duration || 0,
+                is_recurring: task.is_recurring || false,
+                related_event_id: task.related_event_id || finalEvent?.id || reviewData?.originalEvent?.id
+              }));
+              
+              for (const task of tasksToCreate) {
+                console.log('🔍 [DASHBOARD] Creating task with schema-compliant data:', task);
+                await Task.create(task);
+              }
+              console.log('🔍 [DASHBOARD] Tasks created successfully');
+              toast({ 
+                title: 'AI Tasks Created', 
+                description: `${allTasks.length} task(s) added to your list`, 
+                duration: 3000 
+              });
+            } catch (error) {
+              console.error('Error creating tasks:', error);
+              toast({ 
+                title: 'Error Creating Tasks', 
+                description: 'Failed to create some tasks. Please try again.', 
+                variant: "destructive",
+                duration: 3000 
+              });
+            }
+          }
+          setIsReviewDialogOpen(false);
+          setReviewData(null);
+        }}
+      />
+      
       <div className="grid lg:grid-cols-4 gap-6">
         <motion.div id="weekly-schedule-preview" className="lg:col-span-2" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.1 }}>
           <WeeklySchedulePreview
@@ -345,6 +422,9 @@ export default function Dashboard() {
           <FunFactCard />
         </motion.div>
       </div> */}
+      
+      {/* Temporary debug panel for testing insight tracking */}
+      <InsightDebugPanel />
     </div>
   );
 }

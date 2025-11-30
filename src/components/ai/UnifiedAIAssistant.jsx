@@ -242,6 +242,14 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
           const payload = convertEventPayloadTimezone({ ...action_payload }, allFamilyMembers);
           console.log('🔧 DEBUG: After conversion:', payload);
           if (!payload.family_id) payload.family_id = user?.family_id;
+          // Add detected language to payload
+          if (action_payload.language) {
+            payload.language = action_payload.language;
+            console.log('🔧 DEBUG: Added language to payload:', payload.language);
+            console.log('🔧 DEBUG: Full payload with language:', payload);
+          } else {
+            console.log('🔧 DEBUG: No language in action_payload:', action_payload);
+          }
           await ScheduleEvent.create(payload);
           setConversation(prev => [...prev, { role: 'assistant', content: t('eventCreated') || 'Event created!' }]);
           break;
@@ -251,6 +259,11 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
           for (const ev of events) {
             const payload = convertEventPayloadTimezone({ ...ev }, allFamilyMembers);
             if (!payload.family_id) payload.family_id = user?.family_id;
+            // Add detected language to payload
+            if (action_payload.language) {
+              payload.language = action_payload.language;
+              console.log('🔧 DEBUG: Added language to event payload:', payload.language);
+            }
             await ScheduleEvent.create(payload);
           }
           setConversation(prev => [...prev, { role: 'assistant', content: t('eventsCreated') || 'Events created!' }]);
@@ -443,6 +456,7 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
             tasks,
             events: eventsWithSelection,
             items: wishlist,
+            language: languageToUse, // Pass detected language to action payload
           }
         });
       }
@@ -819,8 +833,15 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
                         if (events && events.length) {
                           console.log('🔧 DEBUG: bulkCreate events triggered');
                           console.log('🔧 DEBUG: Raw events array:', events);
-                          // Apply timezone conversion to all events
-                          const convertedEvents = events.map(event => convertEventPayloadTimezone(event, allFamilyMembers));
+                          // Apply timezone conversion to all events and add language
+                          const convertedEvents = events.map(event => {
+                            const converted = convertEventPayloadTimezone(event, allFamilyMembers);
+                            if (pendingAction.action_payload?.language) {
+                              converted.language = pendingAction.action_payload.language;
+                              console.log('🔧 DEBUG: Added language to bulk event:', converted.language);
+                            }
+                            return converted;
+                          });
                           console.log('🔧 DEBUG: After bulk conversion:', convertedEvents);
                           await ScheduleEvent.bulkCreate(convertedEvents);
                         }

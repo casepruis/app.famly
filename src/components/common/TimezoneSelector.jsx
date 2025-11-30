@@ -127,11 +127,8 @@ export default function TimezoneSelector() {
         console.error('❌ Failed to update localStorage:', e);
       }
       
-      // Refresh page to see changes in event displays
-      console.log('🔄 Refreshing page to show timezone changes...');
-      setTimeout(() => {
-        window.location.reload();
-      }, 500);
+      // Changes will be reflected automatically via WebSocket or natural re-renders
+      console.log('🔄 Timezone changes will be reflected automatically');
       
     } catch (e) {
       console.error('❌ Failed to update timezone in database:', e);

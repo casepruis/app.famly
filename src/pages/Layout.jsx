@@ -29,7 +29,8 @@ import {
   Zap,
   Bot,
   List,
-  Bell
+  Bell,
+  Brain
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
@@ -48,6 +49,7 @@ import { getLanguageInfo } from "@/components/common/translations";
 import { User, FamilyMember, Family, Conversation, ChatMessage, Push } from "@/api/entities";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/use-toast";
+import PlanningInsightNotification from "@/components/ai/PlanningInsightNotification";
 
 import logo from '@/assets/famly_kama_icon.svg';
 
@@ -342,12 +344,10 @@ function LayoutContent({ children, currentPageName }) {
       setCurrentUser(authUser);
 
       if (authUser?.family_id) {
-        const [familyData, convosData] = await Promise.all([
-          Family.get(authUser.family_id).catch(() => null),
-          Conversation.filter({ family_id: authUser.family_id }, '-last_message_timestamp').catch(() => []),
-        ]);
+        console.log('[Layout] 🔍 [OPTIMIZATION] Skipping family fetch - will use FamilyDataContext');
+        // Only load conversations, let FamilyDataContext handle family data
+        const convosData = await Conversation.filter({ family_id: authUser.family_id }, '-last_message_timestamp').catch(() => []);
         console.log("🗂️ Loaded conversations:", convosData);
-        setFamily(familyData);
         setConversations(convosData);
 
         const meAsMember = await FamilyMember.me();
@@ -486,7 +486,8 @@ function LayoutContent({ children, currentPageName }) {
     { title: t('dashboard') || 'Dashboard', url: createPageUrl("Dashboard"), icon: Home, id: 'sidebar-dashboard' },
     { title: t('schedule') || 'Schedule', url: createPageUrl("Schedule"), icon: Calendar, id: 'sidebar-schedule' },
     { title: t('events') || 'Events', url: createPageUrl("Events"), icon: List, id: 'sidebar-events' },
-    { title: t('tasks') || 'Tasks', url: createPageUrl("Tasks"), icon: CheckSquare, id: 'sidebar-tasks' }
+    { title: t('tasks') || 'Tasks', url: createPageUrl("Tasks"), icon: CheckSquare, id: 'sidebar-tasks' },
+    { title: t('planningAgent') || 'Planning Agent', url: createPageUrl("agent"), icon: Brain, id: 'sidebar-agent' }
   ], [t]);
 
   const adminNavItems = useMemo(() => {
@@ -509,7 +510,7 @@ function LayoutContent({ children, currentPageName }) {
   };
 
   const showHeaderActions = useMemo(() => {
-    return ['Dashboard', 'Schedule', 'Tasks', 'FamilyMembers', 'Admin', 'PlatformAdmin', 'Connectors', 'Events','Chat'].includes(currentPageName);
+    return ['Dashboard', 'Schedule', 'Tasks', 'FamilyMembers', 'Admin', 'PlatformAdmin', 'Connectors', 'Events','Chat', 'PlanningAgent'].includes(currentPageName);
   }, [currentPageName]);
 
   const showAddAction = useMemo(() => {
@@ -704,6 +705,9 @@ function LayoutContent({ children, currentPageName }) {
               </div>
               
               <div className="flex items-center gap-2">
+                {/* Planning Agent Insights */}
+                <PlanningInsightNotification />
+                
                 {/* Enable notifications button (shown only when supported and not already granted) */}
                 {currentUser && pushSupported && notifPermission !== 'granted' && (
                   <Button

@@ -12,7 +12,7 @@ import { format, addHours } from "date-fns";
 import { nl, es, fr, de, it, pt } from 'date-fns/locale';
 import { Checkbox } from "@/components/ui/checkbox";
 import { useLanguage } from "@/components/common/LanguageProvider";
-import { InvokeLLM } from "@/api/integrations";
+import { InvokeLLM, InvokeLLMNormalized } from "@/api/integrations";
 import { useToast } from "@/components/ui/use-toast";
 import { Task } from "@/api/entities";
 import { User } from "@/api/entities";
@@ -98,73 +98,74 @@ const TimePicker = ({ value, onChange, placeholder }) => {
 };
 
 
-const analyzeEventWithAI = async (eventData, familyMembers, currentLanguage) => {
-    if (!eventData.title && !eventData.description) {
-        return { suggestedTasks: [], aiMessage: "" };
-    }
-
+const analyzeEventWithAI = async (eventData, familyMembers, currentLanguage, t) => {
+    console.log('🔍 [EVENT-AI] analyzeEventWithAI called with:', {
+        eventTitle: eventData.title,
+        currentLanguage: currentLanguage
+    });
+    
     try {
-        // Step 1: AI Brainstorms Task Titles in Plain Text
-        const brainstormResult = await InvokeLLM({
-            prompt: `You are a family assistant. Analyze the event below. List all potential preparation tasks as a simple, comma-separated list.
-            
-Event: "${eventData.title}" - "${eventData.description}"
-Language for tasks: ${currentLanguage}
+        // Generate tasks using improved AI prompt for comprehensive suggestions
+        const llm = await InvokeLLMNormalized({
+            prompt: `You are a smart family organizer assistant. Analyze this event and suggest 4-6 practical follow-up tasks based on who is attending and the family dynamics.
 
-Examples:
-- Event: "Birthday party" -> "Buy gift, Clean the house, Bake a cake"
-- Event: "Visit mother-in-law" -> "Buy flowers"
-- Event: "Diner met vrienden" -> "Boodschappen doen, Huis schoonmaken"
+**EVENT DETAILS:**
+Title: "${eventData.title || ""}"
+Description: "${eventData.description || ""}"
+Category: "${eventData.category || ""}"
+Assigned to: ${eventData.family_member_ids && eventData.family_member_ids.length > 0 ? eventData.family_member_ids.map(id => {
+                const member = familyMembers.find(m => m.id === id);
+                return member ? `${member.name} (${member.role})` : id;
+            }).join(', ') : 'All family members'}
 
-If no tasks are needed, return an empty string.`,
+**FAMILY MEMBERS:**
+${familyMembers.filter(m => m.role !== 'ai_assistant').map(m => `- ${m.name} (${m.role})`).join('\n')}
+
+**SMART SUGGESTIONS BASED ON FAMILY DYNAMICS:**
+
+1. **Parents going out together** (cinema, dinner, date night) → ALWAYS suggest "Arrange babysitter" or "Ask grandparents to watch kids"
+2. **Single parent going out** → Check if other parent is available, otherwise suggest childcare
+3. **Kids' activities/playdates** → Suggest romantic activities for parents ("Plan date night", "Book restaurant for two")
+4. **Family events** → Suggest coordination tasks
+5. **One parent's work event** → Suggest support for other parent with kids
+6. **Children's appointments** → Suggest which parent should attend
+
+**EXAMPLES:**
+- Cinema for "Mom & Dad" → "Arrange babysitter", "Book cinema tickets", "Plan dinner after", "Check movie times"
+- Playdate for "Kids" → "Plan romantic dinner for parents", "Book date activity", "Send playdate confirmation"
+- Work event for "Dad" → "Mom handles kids pickup", "Prepare dinner early", "Coordinate schedules"
+- Birthday party for "Emma" → "Buy gift", "Arrange transport", "RSVP to host", "Plan outfit"
+
+Provide a short title and practical, family-context-aware tasks:`,
             response_json_schema: {
                 type: "object",
                 properties: {
-                    task_titles: {
-                        type: "string",
-                        description: "A comma-separated list of task titles."
-                    }
+                    short_title: { type: "string" },
+                    suggestedTasks: { type: "array", items: { type: "string" } },
+                    tasks: { type: "array", items: { type: "string" } },
+                    summary: { type: "string" }
                 },
-                required: ["task_titles"]
+                additionalProperties: true
             }
         });
 
-        const taskTitlesString = brainstormResult.task_titles;
-        if (!taskTitlesString) {
-            // Note: This message is currently hardcoded in Dutch. It should ideally be translated based on `currentLanguage`
-            // if `analyzeEventWithAI` is to return localized messages directly, or translated at the display layer.
-            return { suggestedTasks: [], aiMessage: "Geen specifieke voorbereidende taken gevonden voor dit evenement." };
-        }
+        const normalizedSuggestedTasks = (llm.suggestedTasks || []).map((t) =>
+            typeof t === "string" ? { title: t } : t
+        );
 
-        const taskTitles = taskTitlesString.split(',').map(t => t.trim()).filter(Boolean);
-        if (taskTitles.length === 0) {
-            return { suggestedTasks: [], aiMessage: "Geen specifieke voorbereidende taken gevonden voor dit evenement." };
-        }
-
-        // Step 2: Code Structures the Tasks Reliably
-        const eventDate = new Date(eventData.start_time);
-        const threeDaysBefore = new Date(eventDate);
-        threeDaysBefore.setDate(eventDate.getDate() - 3);
-        const defaultDueDate = threeDaysBefore.toISOString().split('T')[0];
-
-        const suggestedTasks = taskTitles.map(title => ({
-            title: title,
-            // Note: This description is currently hardcoded in Dutch.
-            description: `Voorbereidende taak voor het evenement: "${eventData.title}"`,
-            due_date: defaultDueDate,
-            assigned_to: []
-        }));
-
+        console.log('🔍 [EVENT-AI] Generated tasks:', normalizedSuggestedTasks);
+        
         return {
-            suggestedTasks: suggestedTasks,
-            // Note: This message is currently hardcoded in Dutch.
-            aiMessage: "Ik heb de volgende voorbereidende taken voorgesteld voor uw evenement. Controleer en bevestig alstublieft."
+            suggestedTasks: normalizedSuggestedTasks,
+            aiMessage: llm.summary || t('aiGeneratedSuggestions') || "AI generated suggestions for your event."
         };
-
+        
     } catch (error) {
-        console.error('AI analysis error:', error);
-        // Note: This message is currently hardcoded in Dutch.
-        return { suggestedTasks: [], aiMessage: "Er is een fout opgetreden bij het analyseren van het evenement." };
+        console.error('🚨 [EVENT-AI] Error generating tasks:', error);
+        return {
+            suggestedTasks: [],
+            aiMessage: t('aiAnalysisFailedRetry') || "AI analysis failed. Please try again."
+        };
     }
 };
 
@@ -203,6 +204,10 @@ const generateShortTitleWithAI = async (eventData, currentLanguage) => {
 
 export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyMembers, initialData = null, selectedDate = null, selectedHour = null, preselectedMemberId = null, userLoaded = true }) {
     const { t, currentLanguage } = useLanguage();
+    
+    // Debug language on every render
+    console.log('🌍 [EVENTDIALOG] Current language from useLanguage():', currentLanguage);
+    
     const { toast } = useToast();
     const [isProcessing, setIsProcessing] = useState(false);
     const [showRecurringOptions, setShowRecurringOptions] = useState(false);
@@ -320,18 +325,44 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
                 processedEventData.short_title = shortTitle;
             }
 
-            const aiResult = await analyzeEventWithAI(processedEventData, familyMembers, currentLanguage);
+            // Add language to event data so backend can use it for task generation
+            processedEventData.language = currentLanguage;
+            console.log('🔍 [EVENTDIALOG] Adding language to event data:', currentLanguage);
 
             // Determine edit type based on whether this is an update or create
             const editType = initialData ? (showRecurringOptions ? 'series' : 'single') : 'single';
 
-            // Always call onSave, which will handle whether to show the review dialog or not
-            onSave(processedEventData, aiResult, editType);
+            // For new events, let the parent handle AI analysis (EventCreationService)
+            // For existing events, do the AI analysis here as before
+            if (!initialData) {
+                console.log('🔍 [EVENTDIALOG] New event - letting parent handle AI analysis');
+                onSave(processedEventData, null, editType);
+            } else {
+                console.log('🔍 [EVENTDIALOG] Existing event - doing AI analysis in dialog');
+                let aiResult = null;
+                try {
+                    aiResult = await analyzeEventWithAI(processedEventData, familyMembers, currentLanguage, t);
+                    console.log('🔍 [EVENTDIALOG] AI analysis completed:', aiResult);
+                } catch (aiError) {
+                    console.error('🚨 [EVENTDIALOG] AI analysis failed, continuing without suggestions:', aiError);
+                    aiResult = {
+                        suggestedTasks: [],
+                        aiMessage: t('aiAnalysisFailed') || 'AI analysis failed, but event will be saved.'
+                    };
+                }
+                onSave(processedEventData, aiResult, editType);
+            }
 
         } catch(error) {
-            console.error("Error processing event:", error);
-            toast({ title: t('processingFailed') || 'Processing failed', description: t('unexpectedErrorOccurred') || 'An unexpected error occurred. Please try again.', variant: "destructive", duration: 5000 });
+            console.error("🚨 [EVENTDIALOG] Error processing event:", error);
+            toast({ 
+                title: t('processingFailed') || 'Processing failed', 
+                description: `${t('unexpectedErrorOccurred') || 'An unexpected error occurred.'} ${error.message || 'Please try again.'}`, 
+                variant: "destructive", 
+                duration: 5000 
+            });
         } finally {
+            console.log('🔍 [EVENTDIALOG] Resetting loading states');
             setIsProcessing(false);
             setAiLoading(false);
         }

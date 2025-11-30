@@ -7,6 +7,8 @@ import { format, parseISO } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import EventDialog from "@/components/schedule/EventDialog";
+import AIReviewDialog from "@/components/schedule/AIReviewDialog";
+import { createEventService } from "@/services/eventCreationService";
 import { ScheduleEvent } from "@/api/entities";
 import { useToast } from "@/components/ui/use-toast";
 import { useLanguage } from "@/components/common/LanguageProvider";
@@ -35,6 +37,8 @@ const getEventAppearance = (event) => {
 export default function UpcomingEvents({ events, familyMembers }) {
   const [showDialog, setShowDialog] = useState(false);
   const [dialogData, setDialogData] = useState(null);
+  const [isReviewDialogOpen, setIsReviewDialogOpen] = useState(false);
+  const [reviewData, setReviewData] = useState(null);
   const navigate = useNavigate();
   const { t } = useLanguage();
   const { toast } = useToast();
@@ -53,18 +57,108 @@ export default function UpcomingEvents({ events, familyMembers }) {
     setShowDialog(true);
   };
   const handleDialogClose = () => setShowDialog(false);
-  const handleDialogSave = async (eventData) => {
+  
+  const handleDialogSave = async (eventData, aiResult, editType) => {
     try {
-      // Try to get user from localStorage (or pass as prop/context if available)
+      // Get user and family context
       const user = JSON.parse(localStorage.getItem("famlyai_user"));
       if (!user) throw new Error("User not loaded");
-      let eventToSave = { ...eventData, family_id: user.family_id };
-      await ScheduleEvent.create(eventToSave);
-      toast({ title: t("eventCreated") || "Event created", description: eventToSave.title, duration: 5000 });
+      
+      const eventToSave = { ...eventData, family_id: user.family_id };
+      
+      console.log('🔄 [DASHBOARD] Processing event with AI:', eventToSave.title);
+      console.log('🔄 [DASHBOARD] AI result provided?', !!aiResult);
+      
+      let reviewPayload;
+      
+      if (aiResult) {
+        // Event was edited in dialog, already has AI analysis
+        console.log('🔄 [DASHBOARD] Using existing AI analysis from dialog');
+        reviewPayload = {
+          originalEvent: eventToSave,
+          aiResult: aiResult,
+          planningInsights: [], // Dialog doesn't generate insights
+          type: 'event',
+          isNew: !eventData.id
+        };
+        
+        // Still need to save the event
+        const savedEvent = await ScheduleEvent.create(eventToSave);
+        reviewPayload.originalEvent = savedEvent;
+      } else {
+        // New event - use shared event service for full AI processing
+        console.log('🔄 [DASHBOARD] Using event service for full AI processing');
+        const eventService = createEventService(user.family_id, familyMembers);
+        reviewPayload = await eventService.processAndSaveEvent(eventToSave);
+      }
+      
+      console.log('🔄 [DASHBOARD] Event processing completed, payload:', reviewPayload);
+      
+      setReviewData(reviewPayload);
       setShowDialog(false);
-      if (typeof reload === "function") reload();
+
+      // Show review dialog if there are suggestions or insights
+      const hasSuggestions = reviewPayload.aiResult?.suggestedTasks?.length > 0;
+      const hasInsights = reviewPayload.planningInsights?.length > 0;
+      
+      if (hasSuggestions || hasInsights) {
+        console.log('🔍 [DASHBOARD] Opening review dialog with:', {
+          tasks: reviewPayload.aiResult?.suggestedTasks?.length || 0,
+          insights: reviewPayload.planningInsights?.length || 0
+        });
+        setIsReviewDialogOpen(true);
+      } else {
+        console.log('🔍 [DASHBOARD] No suggestions, proceeding to direct save');
+        handleConfirmSave(reviewPayload.originalEvent, []);
+      }
+      
     } catch (err) {
-      toast({ title: t("errorSavingEvent") || "Error saving event", description: err.message, variant: "destructive", duration: 5000 });
+      console.error('🚨 [DASHBOARD] Event processing failed:', err);
+      console.error('🚨 [DASHBOARD] Error details:', err.message, err.stack);
+      toast({ 
+        title: t("errorSavingEvent") || "Error saving event", 
+        description: err.message, 
+        variant: "destructive", 
+        duration: 5000 
+      });
+    }
+  };
+
+  const handleConfirmSave = async (finalEventData, tasksToCreate) => {
+    try {
+      console.log('🔍 [DASHBOARD] Final save with tasks:', tasksToCreate?.length || 0);
+      
+      // Save the event
+      await ScheduleEvent.create(finalEventData);
+      
+      // Save tasks if any
+      if (tasksToCreate && tasksToCreate.length > 0) {
+        const { Task } = await import("@/api/entities");
+        for (const task of tasksToCreate) {
+          await Task.create({
+            ...task,
+            family_id: finalEventData.family_id
+          });
+        }
+      }
+
+      toast({ 
+        title: t("eventCreated") || "Event created", 
+        description: finalEventData.title, 
+        duration: 5000 
+      });
+      
+      if (typeof reload === "function") reload();
+      setIsReviewDialogOpen(false);
+      
+    } catch (err) {
+      console.error('🚨 [DASHBOARD] Final save failed:', err);
+      toast({ 
+        title: t("errorSavingEvent") || "Error saving event", 
+        description: err.message, 
+        variant: "destructive", 
+        duration: 5000 
+      });
     }
   };
   const handleDialogDelete = () => setShowDialog(false);
@@ -72,17 +166,7 @@ export default function UpcomingEvents({ events, familyMembers }) {
   return (
     <Card id="upcoming-events-card" className="h-full">
       <CardContent className="p-4">
-        {showDialog && (
-          <EventDialog
-            isOpen={showDialog}
-            onClose={handleDialogClose}
-            onSave={handleDialogSave}
-            onDelete={handleDialogDelete}
-            familyMembers={familyMembers}
-            initialData={dialogData && dialogData.id ? { ...dialogData, id: undefined } : dialogData}
-          />
-        )}
-  <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between">
     <div className="flex items-center gap-2">
       <Calendar className="w-4 h-4 text-gray-400" />
       <span className="text-sm font-medium text-gray-600">{t('upcomingEvents')}</span>
@@ -152,6 +236,28 @@ export default function UpcomingEvents({ events, familyMembers }) {
           
         </div>
       </CardContent>
+      
+      {/* Event Creation Dialog */}
+      {showDialog && (
+        <EventDialog
+          isOpen={showDialog}
+          onClose={handleDialogClose}
+          onSave={handleDialogSave}
+          onDelete={handleDialogDelete}
+          initialData={dialogData}
+          familyMembers={familyMembers}
+        />
+      )}
+
+      {/* AI Review Dialog */}
+      {isReviewDialogOpen && reviewData && (
+        <AIReviewDialog
+          isOpen={isReviewDialogOpen}
+          onClose={() => setIsReviewDialogOpen(false)}
+          onConfirm={handleConfirmSave}
+          reviewData={reviewData}
+        />
+      )}
     </Card>
   );
 }

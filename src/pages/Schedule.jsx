@@ -40,13 +40,14 @@ const useEventWebSocket = (reload) => {
             data.type === 'schedule_event_created' ||
             data.type === 'schedule_event_updated' ||
             data.type === 'schedule_event_deleted')) {
-            reload();
+            // Data updates handled by FamilyDataContext WebSocket - no manual reload needed
+            console.log('🔍 [OPTIMIZATION] Schedule WebSocket update - no manual reload needed');
           }
         } catch {}
       };
     } catch {}
     return () => { try { ws && ws.close(); } catch {} };
-  }, [reload]);
+  }, []);
 };
 import { ScheduleEvent, FamilyMember, User, Task } from "@/api/entities";
 import {
@@ -68,6 +69,8 @@ import ScheduleSidebar from "../components/schedule/ScheduleSidebar";
 import EventDialog from "../components/schedule/EventDialog";
 import AIReviewDialog from "../components/schedule/AIReviewDialog";
 import { InvokeLLMNormalized } from "@/api/integrations"; // make sure you still have this client
+import { AIAgent } from "@/api/aiAgent";
+import { createEventService } from "@/services/eventCreationService";
 
 const scheduleTourSteps = [
   { target: '#calendar-view-toggle', title: 'Calendar Views', content: 'Switch between a traditional weekly calendar and a "By Member" view to see schedules from different perspectives.'},
@@ -146,8 +149,26 @@ const generateRecurringEvents = (baseEvent) => {
 };
 
 export default function Schedule() {
-  const { user, family, members: familyMembers, events, isLoading, error, reload } = useFamilyData();
-  useEventWebSocket(reload);
+  // Request tracking for debugging
+  const requestTracker = useRef({
+    requests: [],
+    log(operation, details) {
+      const timestamp = new Date().toISOString();
+      this.requests.push({ timestamp, operation, details });
+      console.log(`🔍 [SCHEDULE-REQUEST] ${operation}`, details);
+      
+      // Warn about potential duplicates in last 2 seconds
+      const recent = this.requests.filter(r => 
+        Date.now() - new Date(r.timestamp).getTime() < 2000 && 
+        r.operation === operation
+      );
+      if (recent.length > 1) {
+        console.warn(`⚠️ [DUPLICATE] ${operation} called ${recent.length} times in 2s`);
+      }
+    }
+  });
+  const { user, family, members: familyMembers, events, isLoading, error } = useFamilyData();
+  // Removed useEventWebSocket(reload) - FamilyDataContext handles WebSocket updates
   const [selectedMembers, setSelectedMembers] = useState([]);
   const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
@@ -247,60 +268,58 @@ export default function Schedule() {
 
 
   const handleProcessSave = async (eventData, _ignored, editType = "single") => {
-  try {
-    const llm = await InvokeLLMNormalized({
-      prompt: `You are a family organizer assistant. Suggest a very short 2–3 word title and any useful follow-up tasks as plain strings.
-Event Title: "${eventData.title || ""}"
-Description: "${eventData.description || ""}"
-Category: "${eventData.category || ""}"`,
-      response_json_schema: {
-        type: "object",
-        properties: {
-          short_title: { type: "string" },
-          suggestedTasks: { type: "array", items: { type: "string" } },
-          tasks: { type: "array", items: { type: "string" } },
-          summary: { type: "string" }
-        },
-        additionalProperties: true
+    console.log('🚀 [SCHEDULE] ===== HANDLEPROCESSSAVE STARTED (v2.1) =====');
+    console.log('🚀 [SCHEDULE] Timestamp:', new Date().toISOString());
+    console.log('🚀 [SCHEDULE] eventData:', eventData?.title);
+    console.log('🚀 [SCHEDULE] editType:', editType);
+    console.log('🚀 [SCHEDULE] familyId from context:', familyId);
+    
+    try {
+      // Use shared event service for AI processing
+      const eventService = createEventService(familyId, familyMembers);
+      const reviewPayload = await eventService.processAndSaveEvent(eventData, editType);
+      
+      // Add selected event data for editing context
+      reviewPayload.initialData = selectedEvent;
+      
+      setReviewData(reviewPayload);
+      setIsEventDialogOpen(false);
+
+      // Show review dialog if there are either task suggestions OR planning insights
+      const hasSuggestions = reviewPayload.aiResult?.suggestedTasks?.length > 0;
+      const hasInsights = reviewPayload.planningInsights?.length > 0;
+      
+      if (hasSuggestions || hasInsights) {
+        console.log('🔍 [SCHEDULE] Opening review dialog with:', {
+          tasks: reviewPayload.aiResult?.suggestedTasks?.length || 0,
+          insights: reviewPayload.planningInsights?.length || 0
+        });
+        setIsReviewDialogOpen(true);
+      } else {
+        console.log('🔍 [SCHEDULE] No suggestions, proceeding directly to save');
+        handleConfirmSave(reviewPayload.originalEvent, [], editType);
       }
-    });
-
-    const normalizedSuggestedTasks = (llm.suggestedTasks || []).map((t) =>
-      typeof t === "string" ? { title: t } : t
-    );
-
-    const reviewPayload = {
-      originalEvent: {
-        ...eventData,
-        short_title: eventData.short_title || llm.short_title || eventData.short_title
-      },
-      aiResult: {
-        ...llm,
-        suggestedTasks: normalizedSuggestedTasks
-      },
-      initialData: selectedEvent,
-      editType
-    };
-
-    setReviewData(reviewPayload);
-    setIsEventDialogOpen(false);
-
-    if (normalizedSuggestedTasks.length > 0) {
-      setIsReviewDialogOpen(true);
-    } else {
-      handleConfirmSave(reviewPayload.originalEvent, [], editType);
+    } catch (err) {
+      console.error("🚨 [SCHEDULE] ===== HANDLEPROCESSSAVE ERROR =====");
+      console.error("🚨 [SCHEDULE] AI suggestion failed:", err);
+      console.error("🚨 [SCHEDULE] Error name:", err.name);
+      console.error("🚨 [SCHEDULE] Error message:", err.message);
+      console.error("🚨 [SCHEDULE] Error stack:", err.stack);
+      console.error("🚨 [SCHEDULE] ===== PROCEEDING TO SAVE WITHOUT AI =====");
+      handleConfirmSave(eventData, [], editType);
     }
-  } catch (err) {
-    console.error("AI suggestion failed:", err);
-    handleConfirmSave(eventData, [], editType);
-  }
-};
-
-
+  };
 
 
 
   const handleConfirmSave = async (finalEventData, tasksToCreate, editType = "single") => {
+    console.log('🔍 [SCHEDULE] handleConfirmSave called with:', {
+      finalEventData: finalEventData?.title,
+      tasksToCreate: tasksToCreate,
+      tasksCount: tasksToCreate?.length,
+      editType
+    });
+    
     try {
       const isUpdate = reviewData && reviewData.initialData && reviewData.initialData.id;
 
@@ -343,6 +362,59 @@ Category: "${eventData.category || ""}"`,
             updateData.recurrence_id = null;
           }
           await ScheduleEvent.update(initialEvent.id, updateData);
+          requestTracker.current.log('ScheduleEvent.update', { eventId: initialEvent.id });
+          
+          // Also create tasks for updated events if provided
+          if (tasksToCreate && tasksToCreate.length > 0) {
+            try {
+              console.log('🔍 [SCHEDULE] Creating tasks for updated event');
+              console.log('🔍 [SCHEDULE] tasksToCreate for update:', tasksToCreate);
+              console.log('🔍 [SCHEDULE] initialEvent.id:', initialEvent.id);
+              console.log('🔍 [SCHEDULE] familyId:', familyId);
+              
+              const tasksPayload = tasksToCreate.map((task, index) => {
+                console.log(`🔍 [SCHEDULE] Processing update task ${index}:`, task);
+                const payload = {
+                  ...task,
+                  family_id: familyId,
+                  status: "todo",
+                  ai_suggested: true,
+                  related_event_id: initialEvent.id,
+                };
+                console.log(`🔍 [SCHEDULE] Update task ${index} payload:`, payload);
+                return payload;
+              });
+              
+              console.log('🔍 [SCHEDULE] Final tasks payload for update:', tasksPayload);
+              
+              // Validate payload before sending
+              const invalidTasks = tasksPayload.filter(task => !task.title || !task.family_id);
+              if (invalidTasks.length > 0) {
+                console.error('🚨 [SCHEDULE] Invalid update tasks in payload:', invalidTasks);
+                throw new Error(`Invalid update tasks detected: ${invalidTasks.length} tasks missing required fields`);
+              }
+              
+              console.log('🔍 [SCHEDULE] About to call Task.bulkCreate for update with', tasksPayload.length, 'tasks');
+              const createdTasks = await Task.bulkCreate(tasksPayload);
+              console.log('🔍 [SCHEDULE] Update Task.bulkCreate returned:', createdTasks);
+              requestTracker.current.log('Task.bulkCreate (update event)', { count: tasksPayload.length });
+              console.log('🔍 [SCHEDULE] Tasks created successfully for update');
+              toast({
+                title: t("tasksCreated") || "Tasks Created",
+                description: `${tasksToCreate.length} task(s) added to your list`,
+                duration: 3000
+              });
+            } catch (taskError) {
+              console.error('🚨 [SCHEDULE] Error creating tasks for update:', taskError);
+              toast({
+                title: "Error Creating Tasks",
+                description: `Failed to create tasks: ${taskError.message || 'Unknown error'}`,
+                variant: "destructive",
+                duration: 5000
+              });
+            }
+          }
+          
           toast({
             title: t("eventUpdated"),
             description:
@@ -354,28 +426,76 @@ Category: "${eventData.category || ""}"`,
       } else {
         const eventsToCreate = generateRecurringEvents({ ...finalEventData, family_id: familyId });
         const savedEvents = await ScheduleEvent.bulkCreate(eventsToCreate);
+        requestTracker.current.log('ScheduleEvent.bulkCreate', { count: eventsToCreate.length });
         const primaryEventId = savedEvents.length > 0 ? savedEvents[0].id : null;
 
         if (tasksToCreate && tasksToCreate.length > 0 && primaryEventId) {
-          const tasksPayload = tasksToCreate.map((task) => ({
-            ...task,
-            family_id: familyId,
-            status: "todo",
-            ai_suggested: true,
-            related_event_id: primaryEventId,
-          }));
-          await Task.bulkCreate(tasksPayload);
+          try {
+            console.log('🔍 [SCHEDULE] Creating tasks for new event');
+            console.log('🔍 [SCHEDULE] tasksToCreate received:', tasksToCreate);
+            console.log('🔍 [SCHEDULE] primaryEventId:', primaryEventId);
+            console.log('🔍 [SCHEDULE] familyId:', familyId);
+            
+            const tasksPayload = tasksToCreate.map((task, index) => {
+              console.log(`🔍 [SCHEDULE] Processing task ${index}:`, task);
+              const payload = {
+                ...task,
+                family_id: familyId,
+                status: "todo",
+                ai_suggested: true,
+                related_event_id: primaryEventId,
+              };
+              console.log(`🔍 [SCHEDULE] Task ${index} payload:`, payload);
+              return payload;
+            });
+            
+            console.log('🔍 [SCHEDULE] Final tasks payload:', tasksPayload);
+            
+            // Validate payload before sending
+            const invalidTasks = tasksPayload.filter(task => !task.title || !task.family_id);
+            if (invalidTasks.length > 0) {
+              console.error('🚨 [SCHEDULE] Invalid tasks in payload:', invalidTasks);
+              throw new Error(`Invalid tasks detected: ${invalidTasks.length} tasks missing required fields`);
+            }
+            
+            console.log('🔍 [SCHEDULE] About to call Task.bulkCreate with', tasksPayload.length, 'tasks');
+            const createdTasks = await Task.bulkCreate(tasksPayload);
+            console.log('🔍 [SCHEDULE] Task.bulkCreate returned:', createdTasks);
+            requestTracker.current.log('Task.bulkCreate (new event)', { count: tasksPayload.length });
+            console.log('🔍 [SCHEDULE] Tasks created successfully');
+            toast({
+              title: t("tasksCreated") || "Tasks Created", 
+              description: `${tasksToCreate.length} task(s) added to your list`,
+              duration: 3000
+            });
+          } catch (taskError) {
+            console.error('🚨 [SCHEDULE] Error creating tasks for new event:', taskError);
+            toast({
+              title: "Error Creating Tasks",
+              description: `Failed to create tasks: ${taskError.message || 'Unknown error'}`,
+              variant: "destructive", 
+              duration: 5000
+            });
+          }
+        } else {
+          console.log('🔍 [SCHEDULE] Not creating tasks:', {
+            hasTasksToCreate: !!tasksToCreate,
+            taskCount: tasksToCreate?.length,
+            hasPrimaryEventId: !!primaryEventId
+          });
         }
 
-        toast({
-          title: t("eventSaved"),
-          description:
-            t("eventSavedDescription", { title: finalEventData.title }) +
-            (eventsToCreate.length > 1 ? ` (${t("instancesCreated", { count: eventsToCreate.length })})` : ""),
-          duration: 5000 
-        });
-
-        // --- Actionable notification for event assignees (toast + push) ---
+          toast({
+            title: t("eventSaved"),
+            description:
+              t("eventSavedDescription", { title: finalEventData.title }) +
+              (eventsToCreate.length > 1 ? ` (${t("instancesCreated", { count: eventsToCreate.length })})` : ""),
+            duration: 5000 
+          });
+          
+          // Close dialogs - WebSocket will handle data refresh
+          setIsEventDialogOpen(false);
+          setIsReviewDialogOpen(false);        // --- Actionable notification for event assignees (toast + push) ---
         const assignees = Array.isArray(finalEventData.family_member_ids) ? finalEventData.family_member_ids : [];
         if (user && assignees.includes(user.id)) {
           let assignerName = user.name || "Someone";
@@ -398,7 +518,8 @@ Category: "${eventData.category || ""}"`,
       setReviewData(null);
       setSelectedEvent(null);
       setSelectedTimeSlot(null);
-      if (reload) await reload();
+      // WebSocket will handle data updates automatically
+      console.log('🔍 [OPTIMIZATION] Skipping manual reload - WebSocket will update data');
     }
   };
 
@@ -414,6 +535,7 @@ Category: "${eventData.category || ""}"`,
         try {
           setIsLoading(true);
           const allSeriesEvents = await ScheduleEvent.filter({ recurrence_id: event.recurrence_id });
+          requestTracker.current.log('ScheduleEvent.filter', { recurrence_id: event.recurrence_id, count: allSeriesEvents.length });
           let deletedTasksCount = 0;
 
           for (const seriesEvent of allSeriesEvents) {
@@ -478,6 +600,7 @@ Category: "${eventData.category || ""}"`,
           }
 
           await ScheduleEvent.delete(event.id);
+          requestTracker.current.log('ScheduleEvent.delete', { eventId: event.id });
           toast({ title: t("eventDeleted"), description: t("eventDeletedDescription", { title: event.title }) , duration: 5000 });
           deletionSuccessful = true;
         } catch (error) {

@@ -8,6 +8,60 @@ const API_BASE =
   || (import.meta?.env?.VITE_API_BASE)                // Vite build-time (optional)
   || "/api";                                          // default: same-origin; nginx proxies to backend
 
+// API call tracking
+const apiCallTracker = {
+  calls: new Map(),
+  logCall(method, path, params) {
+    const callKey = `${method} ${path}`;
+    const count = this.calls.get(callKey) || 0;
+    this.calls.set(callKey, count + 1);
+    
+    console.log(`🌐 [API] ${method} ${path} (call #${count + 1})`, params ? { params } : '');
+    
+    if (count > 0) {
+      console.warn(`⚠️ [API] Potential duplicate call: ${callKey} (${count + 1} times)`);
+    }
+  },
+  
+  getStats() {
+    console.table(Array.from(this.calls.entries()).map(([call, count]) => ({ call, count })));
+  }
+};
+
+// Expose tracker for debugging
+if (typeof window !== "undefined") {
+  window.apiCallTracker = apiCallTracker;
+}
+
+// API caching to prevent duplicate calls
+const apiCache = {
+  cache: new Map(),
+  cacheTimeout: 30000, // 30 seconds
+  
+  get(key) {
+    const cached = this.cache.get(key);
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+      console.log(`📋 [CACHE-HIT] ${key}`);
+      return cached.data;
+    }
+    return null;
+  },
+  
+  set(key, data) {
+    console.log(`📋 [CACHE-SET] ${key}`);
+    this.cache.set(key, { data, timestamp: Date.now() });
+  },
+  
+  clear() {
+    this.cache.clear();
+  }
+};
+
+// Expose cache for debugging
+if (typeof window !== "undefined") {
+  window.apiCache = apiCache;
+}
+
 
 // --- helpers ---
 const ensureTrailingSlash = (u) => {
@@ -33,6 +87,10 @@ const buildQueryParams = (params = {}, orderBy = null, limit = null) => {
 // api/http.ts (or wherever fetchWithAuth lives)
 // --- helpers ---
 export async function fetchWithAuth(path, options = {}) {
+  // Track API call
+  const method = options.method || 'GET';
+  apiCallTracker.logCall(method, path, options.body);
+  
   const base =
     (import.meta && import.meta.env && (import.meta.env.VITE_API_BASE || "") || "").replace(/\/+$/, "") ||
     "/api";
@@ -165,6 +223,8 @@ export const Task = {
   },
 
   create: (data) => {
+    console.log('🔍 [TASK-API] create called with data:', data);
+    
     const payload = { ...data };
     if (!payload.id) delete payload.id;
     if (payload.due_date === "" || payload.due_date == null)
@@ -172,9 +232,18 @@ export const Task = {
     if (payload.assigned_to && !Array.isArray(payload.assigned_to)) {
       payload.assigned_to = [payload.assigned_to].flat().filter(Boolean);
     }
+    
+    console.log('🔍 [TASK-API] Final payload being sent to API:', payload);
+    
     return fetchWithAuth("/tasks/", {
       method: "POST",
       body: JSON.stringify(payload),
+    }).then(result => {
+      console.log('🔍 [TASK-API] API response:', result);
+      return result;
+    }).catch(error => {
+      console.error('🚨 [TASK-API] API call failed:', error);
+      throw error;
     });
   },
 
@@ -193,11 +262,25 @@ export const Task = {
   delete: (id) => fetchWithAuth(`/tasks/${id}`, { method: "DELETE" }),
 
   bulkCreate: async (tasks = []) => {
+    console.log('🔍 [TASK-API] bulkCreate called with:', tasks);
+    console.log('🔍 [TASK-API] Number of tasks to create:', tasks.length);
+    
     const results = [];
-    for (const t of tasks) {
-      // eslint-disable-next-line no-await-in-loop
-      results.push(await Task.create(t));
+    for (const [index, t] of tasks.entries()) {
+      try {
+        console.log(`🔍 [TASK-API] Creating task ${index + 1}/${tasks.length}:`, t);
+        // eslint-disable-next-line no-await-in-loop
+        const result = await Task.create(t);
+        console.log(`🔍 [TASK-API] Task ${index + 1} created successfully:`, result);
+        results.push(result);
+      } catch (error) {
+        console.error(`🚨 [TASK-API] Failed to create task ${index + 1}:`, error);
+        console.error(`🚨 [TASK-API] Failed task data:`, t);
+        throw error; // Re-throw to stop the process
+      }
     }
+    
+    console.log('🔍 [TASK-API] All tasks created successfully. Total:', results.length);
     return results;
   },
   // Convert a task to an event
@@ -270,6 +353,10 @@ export const ScheduleEvent = {
 
   create: (data) => {
     const payload = sanitizeEventPayload(data);
+    console.log('📤 [ENTITIES] Creating event with payload:', payload);
+    if (payload.language) {
+      console.log('📤 [ENTITIES] Language parameter detected:', payload.language);
+    }
     return fetchWithAuth("/schedule_events/", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -315,11 +402,17 @@ export const ScheduleEvent = {
 export const FamilyMember = {
   list: () => fetchWithAuth("/family_members/"),
 
-  filter: (params = {}, orderBy = null, limit = null) => {
+  filter: async (params = {}, orderBy = null, limit = null) => {
+    const cacheKey = `family_members-${JSON.stringify(params)}-${orderBy}-${limit}`;
+    const cached = apiCache.get(cacheKey);
+    if (cached) return cached;
+    
     const query = buildQueryParams(params, orderBy, limit);
-    return fetchWithAuth(
+    const result = await fetchWithAuth(
       ensureTrailingSlash(`/family_members${query ? `?${query}` : ""}`)
     );
+    apiCache.set(cacheKey, result);
+    return result;
   },
 
   get: (id) => fetchWithAuth(`/family_members/${id}`),
@@ -343,7 +436,15 @@ export const FamilyMember = {
 
 // ---------- Family ----------
 export const Family = {
-  get: (id) => fetchWithAuth(`/families/${id}`),
+  get: async (id) => {
+    const cacheKey = `family-${id}`;
+    const cached = apiCache.get(cacheKey);
+    if (cached) return cached;
+    
+    const result = await fetchWithAuth(`/families/${id}`);
+    apiCache.set(cacheKey, result);
+    return result;
+  },
   list: () => fetchWithAuth(`/families/all`),
   updateName: (id, name) =>
     fetchWithAuth(`/families/${id}/name`, {

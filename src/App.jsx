@@ -27,6 +27,7 @@ import DataCleanup from '@/pages/DataCleanup';
 import DatabaseRecovery from '@/pages/DatabaseRecovery';
 import ResetPasswordRequest from '@/pages/ResetPasswordRequest';
 import ResetPassword from '@/pages/ResetPassword';
+import PlanningAgent from '@/pages/PlanningAgent';
 
 function App() {
   // Automatically detect and store user timezone
@@ -50,6 +51,7 @@ function App() {
           <Route path="/connectors" element={<RequireAuth><PageWithLayout><Connectors /></PageWithLayout></RequireAuth>} />
           <Route path="/chat" element={<RequireAuth><PageWithLayout><Chat /></PageWithLayout></RequireAuth>} />
           <Route path="/aiassistant" element={<RequireAuth><PageWithLayout><AIAssistant /></PageWithLayout></RequireAuth>} />
+          <Route path="/agent" element={<RequireAuth><PageWithLayout><PlanningAgent /></PageWithLayout></RequireAuth>} />
           <Route path="/debug" element={<RequireAuth><PageWithLayout><Debug /></PageWithLayout></RequireAuth>} />
           <Route path="/admin" element={<RequireAuth><PageWithLayout><Admin /></PageWithLayout></RequireAuth>} />
           <Route path="/platformadmin" element={<RequireAuth><PageWithLayout><PlatformAdmin /></PageWithLayout></RequireAuth>} />

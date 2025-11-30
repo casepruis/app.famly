@@ -27,66 +27,59 @@ export const LanguageProvider = ({ children }) => {
 
   const loadUserLanguage = async () => {
     setIsLoading(true);
+    
+    // First check localStorage for immediate language preference
+    const savedLanguage = localStorage.getItem('famlyai_language');
+    if (savedLanguage) {
+      setCurrentLanguage(savedLanguage);
+      console.log('[LanguageProvider] Loaded language from localStorage:', savedLanguage);
+    }
+    
     try {
       const user = await User.me();
       if (!user || !user.family_id) {
-        setCurrentLanguage('en');
+        setCurrentLanguage(savedLanguage || 'en');
         setIsLoading(false);
         return;
       }
 
-      // Safely get family data with error handling
-      let family = null;
-      try {
-        family = await Family.get(user.family_id);
-      } catch (familyError) {
-        console.warn('Could not load family data:', familyError);
-        // Continue with default language if family data fails
-      }
-
-      const defaultLang = family?.language || 'en';
-      setFamilyLanguage(defaultLang);
-
-      // Safely get user's member profile
-      let members = [];
-      try {
-        members = await FamilyMember.filter({ 
-          family_id: user.family_id, 
-          user_id: user.id 
-        });
-      } catch (memberError) {
-        console.warn('Could not load member data:', memberError);
-        // Continue with family default language if member data fails
-      }
+      console.log('🔍 [OPTIMIZATION] LanguageProvider: Loading with localStorage persistence');
       
-      if (members.length > 0) {
-        const member = members[0];
-        setUserMember(member);
-        setCurrentLanguage(member.language || defaultLang);
-      } else {
-        setCurrentLanguage(defaultLang);
+      // Use user language preference if available
+      if (user.language && (!savedLanguage || savedLanguage !== user.language)) {
+        setCurrentLanguage(user.language);
+        localStorage.setItem('famlyai_language', user.language);
+        console.log('🌍 [LanguageProvider] Using user preference:', user.language);
+      } else if (!savedLanguage) {
+        // Default to English or detected language
+        const detected = detectLanguage();
+        setCurrentLanguage(detected);
+        localStorage.setItem('famlyai_language', detected);
+        console.log('🌍 [LanguageProvider] No preference, using detected:', detected);
       }
     } catch (error) {
-      console.log('Authentication failed, using default language:', error);
-      setCurrentLanguage('en');
+      console.log('Authentication failed, using saved or default language:', error);
+      setCurrentLanguage(savedLanguage || 'en');
     }
     setIsLoading(false);
   };
 
   const updateUserLanguage = async (language) => {
     try {
+      // Always update localStorage first for immediate persistence
+      localStorage.setItem('famlyai_language', language);
+      setCurrentLanguage(language);
+      
       if (userMember) {
         await FamilyMember.update(userMember.id, { language });
-        setCurrentLanguage(language);
         setUserMember({ ...userMember, language });
+        console.log('[LanguageProvider] Language updated and persisted:', language);
       } else {
-        // If no member profile exists, just update the local state
-        setCurrentLanguage(language);
+        console.log('[LanguageProvider] Language updated locally (no member profile):', language);
       }
     } catch (error) {
       console.error('Error updating language:', error);
-      // Still update local state even if API call fails
-      setCurrentLanguage(language);
+      // Language is still persisted in localStorage even if API call fails
     }
   };
 
