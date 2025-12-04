@@ -1,10 +1,11 @@
 // src/services/eventCreationService.js
-import { InvokeLLMNormalized } from "@/api/integrations";
 import { AIAgent } from "@/api/aiAgent";
 
 /**
- * Shared event creation service with AI processing
- * Used by both Schedule page and Dashboard components
+ * Shared event creation service
+ * 
+ * IMPORTANT: Frontend NEVER calls LLM directly.
+ * All AI processing happens on the backend via AIAgent API.
  */
 export class EventCreationService {
   constructor(familyId, familyMembers = []) {
@@ -13,110 +14,60 @@ export class EventCreationService {
   }
 
   /**
-   * Process and save an event with AI suggestions and planning insights
+   * Process and save an event with AI suggestions
+   * Makes ONE backend call that:
+   * 1. Saves the event
+   * 2. Generates task suggestions
+   * 3. Returns planning insights
    */
   async processAndSaveEvent(eventData, editType = "single") {
-    console.log('🔄 [EVENT-SERVICE] Processing event:', eventData?.title);
-    
     try {
       // FIRST: Save the event to the database
-      console.log('🔄 [EVENT-SERVICE] Saving event to database first...');
       const { ScheduleEvent } = await import("@/api/entities");
       const savedEvent = await ScheduleEvent.create(eventData);
-      console.log('🔄 [EVENT-SERVICE] Event saved with ID:', savedEvent?.id);
       
-      // SECOND: Generate AI task suggestions
-      console.log('🔄 [EVENT-SERVICE] Starting AI task generation...');
-      
-      const llm = await InvokeLLMNormalized({
-        prompt: `You are a family organizer assistant. Suggest a very short 2–3 word title and any useful follow-up tasks as plain strings.
-Event Title: "${eventData.title || ""}"
-Description: "${eventData.description || ""}"
-Category: "${eventData.category || ""}"`,
-        response_json_schema: {
-          type: "object",
-          properties: {
-            short_title: { type: "string" },
-            suggestedTasks: { type: "array", items: { type: "string" } },
-            tasks: { type: "array", items: { type: "string" } },
-            summary: { type: "string" }
-          },
-          additionalProperties: true
-        }
-      });
-
-      console.log('🔄 [EVENT-SERVICE] LLM response:', llm);
-
-      const normalizedSuggestedTasks = (llm.suggestedTasks || []).map((t) =>
-        typeof t === "string" ? { title: t } : t
-      );
-      
-      console.log('🔄 [EVENT-SERVICE] Normalized tasks:', normalizedSuggestedTasks);
-
-      // Fetch planning insights from AI agent
+      // SECOND: Call backend AI agent for analysis (ONE call for everything)
+      let aiResult = { suggestedTasks: [] };
       let planningInsights = [];
-      try {
-        console.log('🤖 [EVENT-SERVICE] Fetching planning insights...');
-        console.log('🤖 [EVENT-SERVICE] familyId:', this.familyId);
-        console.log('🤖 [EVENT-SERVICE] AIAgent available?', typeof AIAgent?.analyzeEvent);
-        
-        if (!this.familyId) {
-          throw new Error('familyId is required for AI analysis');
+      
+      if (this.familyId) {
+        try {
+          const analysis = await AIAgent.analyzeEvent(this.familyId, {
+            title: savedEvent.title,
+            description: savedEvent.description,
+            start_time: savedEvent.start_time,
+            end_time: savedEvent.end_time,
+            family_member_ids: savedEvent.family_member_ids,
+            category: savedEvent.category
+          });
+          
+          // Extract suggested tasks from backend response
+          aiResult.suggestedTasks = (analysis?.suggested_tasks || []).map(t => 
+            typeof t === "string" ? { title: t } : t
+          );
+          aiResult.aiMessage = analysis?.summary;
+          
+          // Extract planning insights
+          planningInsights = analysis?.insights || [];
+          
+        } catch (aiError) {
+          console.warn('[EventService] AI analysis failed:', aiError.message);
         }
-
-        const eventDataForAnalysis = {
-          title: savedEvent.title,
-          description: savedEvent.description,
-          start_time: savedEvent.start_time,
-          end_time: savedEvent.end_time,
-          family_member_ids: savedEvent.family_member_ids,
-          category: savedEvent.category
-        };
-        
-        console.log('🤖 [EVENT-SERVICE] Calling AIAgent.analyzeEvent with data:', eventDataForAnalysis);
-        
-        // Longer delay to ensure event is fully indexed in database
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        const aiAnalysis = await AIAgent.analyzeEvent(this.familyId, eventDataForAnalysis);
-        console.log('🤖 [EVENT-SERVICE] AI analysis response:', aiAnalysis);
-        planningInsights = aiAnalysis?.insights || [];
-        console.log('🤖 [EVENT-SERVICE] Planning insights:', planningInsights.length);
-        
-      } catch (planningError) {
-        console.error('🚨 [EVENT-SERVICE] Planning insights failed:', planningError);
-        // Continue without planning insights
       }
 
-      // Prepare review payload with saved event data
-      const reviewPayload = {
-        originalEvent: {
-          ...savedEvent,
-          short_title: savedEvent.short_title || llm.short_title || savedEvent.title
-        },
-        aiResult: {
-          ...llm,
-          suggestedTasks: normalizedSuggestedTasks
-        },
-        planningInsights: planningInsights,
+      // Prepare review payload
+      return {
+        originalEvent: savedEvent,
+        aiResult,
+        planningInsights,
         initialData: null,
         editType,
         isNew: true
       };
 
-      console.log('🔄 [EVENT-SERVICE] Review payload prepared:', {
-        eventId: savedEvent?.id,
-        tasks: normalizedSuggestedTasks.length,
-        insights: planningInsights.length,
-        aiResult: reviewPayload.aiResult
-      });
-
-      return reviewPayload;
-
     } catch (err) {
-      console.error("🚨 [EVENT-SERVICE] Processing failed:", err);
+      console.error("[EventService] Processing failed:", err);
       
-      // Return simple payload without AI processing
       return {
         originalEvent: eventData,
         aiResult: { suggestedTasks: [] },
@@ -129,19 +80,12 @@ Category: "${eventData.category || ""}"`,
   }
 
   /**
-   * Simple event save without AI processing (fallback)
+   * Simple event save without AI processing
    */
   async saveEventDirectly(eventData) {
-    console.log('🔄 [EVENT-SERVICE] Direct save:', eventData?.title);
-    
-    try {
-      const { ScheduleEvent } = await import("@/api/entities");
-      await ScheduleEvent.create(eventData);
-      return { success: true };
-    } catch (error) {
-      console.error('🚨 [EVENT-SERVICE] Direct save failed:', error);
-      throw error;
-    }
+    const { ScheduleEvent } = await import("@/api/entities");
+    await ScheduleEvent.create(eventData);
+    return { success: true };
   }
 }
 

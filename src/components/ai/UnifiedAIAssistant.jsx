@@ -1,18 +1,20 @@
 // (ReviewAndConfirmPanel removed, now using ActionReviewPanel)
 // UnifiedAIAssistant.jsx (CLEANED)
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ActionReviewPanel from '../common/ActionReviewPanel';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Mic, Send, Bot, Loader2, MessageCircle, Check, X } from "lucide-react";
+import { Mic, MicOff, Send, Bot, Loader2, MessageCircle, Check, X, Volume2, VolumeX } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { useLanguage } from "@/components/common/LanguageProvider";
-import { InvokeLLM } from '@/api/integrations';
+// InvokeLLM removed - all LLM calls go through backend agents
+import { AIAgent } from '@/api/aiAgent';
 import { Task, ScheduleEvent, WishlistItem, ChatMessage, Conversation, fetchWithAuth } from '@/api/entities';
 import { combineDateTimeToISO } from '@/utils/timezone';
 import { detectLanguage, getLanguageName, shouldPromptLanguageSwitch } from '@/utils/languageDetection';
+import { useVoiceAssistant } from '@/hooks/useVoiceAssistant';
 import TasksReviewer from '../chat/TasksReviewer';
 import VacationEventsReview from '../chat/VacationEventsReview';
 
@@ -202,7 +204,72 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
   const [isProcessing, setIsProcessing] = useState(false);
   const [pendingAction, setPendingAction] = useState(null); // {action_type, action_payload}
   const [languageMismatch, setLanguageMismatch] = useState(null); // {detectedLang, userMessage}
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  // useAgents removed - always use backend agents (no direct LLM calls from frontend)
   const conversationEndRef = useRef(null);
+
+  // Voice assistant hook
+  const {
+    isConnected: voiceConnected,
+    isListening,
+    isProcessing: voiceProcessing,
+    isPlaying,
+    connect: connectVoice,
+    disconnect: disconnectVoice,
+    startListening,
+    stopListening,
+    sendText: sendVoiceText,
+  } = useVoiceAssistant({
+    language: currentLanguage,
+    onTranscript: useCallback((text, role) => {
+      if (role === 'user') {
+        setVoiceTranscript(text);
+        setConversation(prev => [...prev, { role: 'user', content: text }]);
+      } else {
+        setConversation(prev => [...prev, { role: 'assistant', content: text }]);
+      }
+    }, []),
+    onFunctionCall: useCallback((name, result) => {
+      console.log('🎤 Voice function call:', name, result);
+      if (result?.success) {
+        onUpdate?.(); // Refresh data after successful action
+      }
+    }, [onUpdate]),
+    onError: useCallback((error) => {
+      console.error('🎤 Voice error:', error);
+      setConversation(prev => [...prev, { 
+        role: 'assistant', 
+        content: currentLanguage === 'nl' 
+          ? `Spraakfout: ${error}` 
+          : `Voice error: ${error}` 
+      }]);
+    }, [currentLanguage]),
+  });
+
+  // Toggle voice mode
+  const toggleVoice = useCallback(async () => {
+    if (voiceEnabled) {
+      disconnectVoice();
+      setVoiceEnabled(false);
+    } else {
+      await connectVoice();
+      setVoiceEnabled(true);
+    }
+  }, [voiceEnabled, connectVoice, disconnectVoice]);
+
+  // Handle microphone button
+  const handleMicClick = useCallback(async () => {
+    if (!voiceEnabled) {
+      await toggleVoice();
+      return;
+    }
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  }, [voiceEnabled, isListening, toggleVoice, startListening, stopListening]);
 
   // persist + autoscroll
   useEffect(() => {
@@ -215,6 +282,8 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
     setConversation([]);
     setPendingAction(null);
     setInputValue('');
+    setVoiceEnabled(false);
+    disconnectVoice();
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
   }, [user?.id]);
 
@@ -222,6 +291,7 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
     setConversation([]);
     setPendingAction(null);
     setInputValue('');
+    setVoiceTranscript('');
     try { localStorage.removeItem(STORAGE_KEY); } catch {}
   };
 
@@ -367,105 +437,97 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
     setConversation(prev => [...prev, userMsg]);
     setIsProcessing(true);
     
-    console.log('🌐 Processing with language:', languageToUse);
+    console.log('🌐 Processing with backend agent, language:', languageToUse);
     
-    // Continue with the regular processing but with specified language
-    await processMessageWithLanguage(messageText, languageToUse);
+    // Always use backend agents - no direct LLM calls from frontend
+    await processWithBackendAgent(messageText, languageToUse);
   };
 
-  const processMessageWithLanguage = async (messageText, overrideLanguage = null) => {
+  /**
+   * Process message using backend agent system
+   * This routes through RootAgent → specialist agents (Planning, Task, etc.)
+   */
+  const processWithBackendAgent = async (messageText, languageToUse) => {
+    const familyId = user?.family_id;
+    
+    if (!familyId) {
+      setConversation(prev => [
+        ...prev,
+        { role: 'assistant', content: t('noFamilyIdError') || "I can't do that without a family context." }
+      ]);
+      return;
+    }
+
     try {
-      const familyMembers = Array.isArray(allFamilyMembers) ? allFamilyMembers : [];
-      const currentUserMember = user ? familyMembers.find(m => m.user_id === user.id) : null;
-      const familyId = user?.family_id || null;
-
-      if (!familyId) {
-        setConversation(prev => [
-          ...prev,
-          { role: 'assistant', content: t('noFamilyIdError') || "I can't do that without a family context. Please set up or join a family first." }
-        ]);
-        setIsProcessing(false);
-        return;
-      }
-
-      // Build conversation history and context
-      // Include the new user message in the history like the working version
-      const userMsg = { role: 'user', content: messageText };
-      const llmHistory = [...conversation, userMsg].map(msg => {
-        return `${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`;
-      }).join('\n');
-
-      const currentFamilyId = user?.family_id;
-      const safeMembers = allFamilyMembers
-        .filter(m => m.family_id === currentFamilyId)
-        .map(m => ({ id: m.id, name: m.name, user_id: m.user_id }));
+      console.log('🤖 Using backend agent for:', messageText.substring(0, 50));
       
-      // Find the current user's family member ID
-      const currentUserFamilyMember = allFamilyMembers.find(m => 
-        m.family_id === currentFamilyId && m.user_id === user?.id
-      );
-      const currentUserFamilyMemberId = currentUserFamilyMember?.id;
-      
-      const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const tz = browserTz || "UTC";
-      const nowIso = new Date().toISOString();
-
-      // Use override language or current language
-      const languageToUse = overrideLanguage || currentLanguage;
-      const languageName = languageToUse === 'nl' ? 'Dutch' : 'English';
-
-      // STRONGER PROMPT: Always extract actionable items if present, never return empty arrays if user asks for something actionable
-      const response = await InvokeLLM({
-        prompt: `You are famly.ai, a helpful family assistant.\n\nAnalyse the conversation and ALWAYS extract actionable items (tasks, events, wishlist) from the user's last message if any requests, wishes, or to-dos are present.\n- If details are missing, make reasonable assumptions.\n- If the user asks for something actionable, NEVER return empty arrays.\n- If nothing actionable is present, return empty arrays.\n\nProvide:\n- a SHORT summary\n- concrete TASKS and EVENTS to create now\n- optional WISHLIST items\n\nRules:\n- Respond ONLY with JSON (no markdown).\n- Write ALL text fields (summary, titles, descriptions) in ${languageName}.\n- Use ONLY existing family member IDs from the list.\n- When assigning to "me" or the current user, use the Current User Family Member ID.\n- Prefer near dates/times (7–14 days), not the past.\n- 24h notation, ISO without timezone (YYYY-MM-DDTHH:MM:SS).\n- If vague: suggest small, certain actions.\n\nNow (local time): ${nowIso} (${tz}).\nUser's preferred language: ${languageName}\n\nContext:\nCHAT LOG:\n---\n${llmHistory}\n---\n\nFamily Members (IDs usable): ${JSON.stringify(safeMembers, null, 2)}\nCurrent User Family Member ID: ${currentUserFamilyMemberId || user?.id}\nFamily ID: ${currentFamilyId}\n\nReturn exact JSON:\n{\n  "summary": "short summary",\n  "tasks": [\n    {\n      "title": "string",\n      "description": "string (optional)",\n      "assigned_to": ["<family_member_id>", "..."],\n      "family_id": "${currentFamilyId}",\n      "due_date": "YYYY-MM-DDTHH:MM:SS (optional)"\n    }\n  ],\n  "events": [\n    {\n      "title": "string",\n      "start_time": "YYYY-MM-DDTHH:MM:SS",\n      "end_time": "YYYY-MM-DDTHH:MM:SS",\n      "family_member_ids": ["<family_member_id>", "..."],\n      "family_id": "${currentFamilyId}",\n      "location": "string (optional)"\n    }\n  ],\n  "wishlist_items": [\n    { "name": "string", "url": "string (optional)", "family_member_id": "<family_member_id>" }\n  ]\n}`,
-        response_json_schema: {
-          type: "object",
-          properties: {
-            summary: { type: "string" },
-            tasks: { type: "array", items: { type: "object", properties: { title: { type: "string" } }, required: ["title"] } },
-            events: { type: "array", items: { type: "object", properties: { title: { type: "string" }, start_time: { type: "string" }, end_time: { type: "string" }, family_id: { type: "string" } }, required: ["title", "start_time", "end_time", "family_id"] } },
-            wishlist_items: { type: "array", items: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } },
-          },
-          required: ["summary", "tasks", "events", "wishlist_items"],
-        },
-        strict: true,
+      const response = await AIAgent.chat(familyId, messageText, {
+        language: languageToUse
       });
-
-      const data = response?.data || response || {};
-      const summary = data.summary ?? "AI suggestions";
-      const tasks = data.tasks ?? [];
-      const events = data.events ?? [];
-      const wishlist = data.wishlist_items ?? [];
-
-      // Always show the summary message
-      setConversation(prev => ([
-        ...prev,
-        { role: 'assistant', content: summary }
-      ]));
-
-      const eventsWithSelection = (events || []).map((e, idx) => ({
-        id: e.id || `event-${Date.now()}-${idx}`,
-        selected: true,
-        ...convertEventPayloadTimezone(e, allFamilyMembers),
-      }));
-
-      const hasActions = (tasks && tasks.length) || (events && events.length) || (wishlist && wishlist.length);
       
-      if (hasActions) {
-        setPendingAction({
-          action_payload: {
-            tasks,
-            events: eventsWithSelection,
-            items: wishlist,
-            language: languageToUse, // Pass detected language to action payload
-          }
-        });
-      }
-    } catch (error) {
-      console.error('Error processing message:', error);
-      setConversation(prev => ([
+      console.log('🤖 Agent response:', response);
+      
+      // Add the agent's response message
+      setConversation(prev => [
         ...prev,
-        { role: 'assistant', content: t('aiError') || "Sorry, I had trouble processing that. Could you try again?" }
-      ]));
+        { role: 'assistant', content: response.message }
+      ]);
+      
+      // Process any suggestions from the agent
+      if (response.suggestions && response.suggestions.length > 0) {
+        const tasks = [];
+        const events = [];
+        const wishlist = [];
+        
+        for (const suggestion of response.suggestions) {
+          if (suggestion.action_type === 'create_task') {
+            tasks.push({
+              ...suggestion.action_data,
+              family_id: familyId,
+            });
+          } else if (suggestion.action_type === 'create_event') {
+            events.push({
+              ...suggestion.action_data,
+              family_id: familyId,
+            });
+          } else if (suggestion.action_type === 'add_to_wishlist') {
+            wishlist.push(suggestion.action_data);
+          }
+        }
+        
+        if (tasks.length || events.length || wishlist.length) {
+          const eventsWithSelection = events.map((e, idx) => ({
+            id: e.id || `event-${Date.now()}-${idx}`,
+            selected: true,
+            ...convertEventPayloadTimezone(e, allFamilyMembers),
+          }));
+          
+          setPendingAction({
+            action_payload: {
+              tasks,
+              events: eventsWithSelection,
+              items: wishlist,
+              language: languageToUse,
+            }
+          });
+        }
+      }
+      
+      // Refresh data if tool calls were made
+      if (response.tool_calls && response.tool_calls.length > 0) {
+        const hasSuccessfulCalls = response.tool_calls.some(tc => tc.status === 'completed');
+        if (hasSuccessfulCalls) {
+          onUpdate?.();
+        }
+      }
+      
+    } catch (error) {
+      console.error('Backend agent error:', error);
+      // Show error to user instead of falling back to direct LLM
+      setConversation(prev => [
+        ...prev,
+        { role: 'assistant', content: t('aiError') || "Sorry, I had trouble processing that. Please try again." }
+      ]);
     } finally {
       setIsProcessing(false);
     }
@@ -504,8 +566,8 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
     setInputValue('');
     setIsProcessing(true);
 
-    // Process with user's current language preference
-    await processMessageWithLanguage(messageText);
+    // Always use backend agents - no direct LLM fallback
+    await processWithBackendAgent(messageText, currentLanguage);
   };
 
   const handleKeyDown = (e) => {
@@ -828,28 +890,92 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
                     cancelLabel="Cancel"
                     onConfirm={async (confirmed) => {
                       const { tasks = [], events = [], items = [] } = confirmed;
+                      const familyId = user?.family_id;
+                      const language = pendingAction.action_payload?.language || currentLanguage;
+                      
                       try {
                         if (tasks && tasks.length) await Task.bulkCreate(tasks);
+                        
+                        let createdEvents = [];
                         if (events && events.length) {
                           console.log('🔧 DEBUG: bulkCreate events triggered');
                           console.log('🔧 DEBUG: Raw events array:', events);
                           // Apply timezone conversion to all events and add language
                           const convertedEvents = events.map(event => {
                             const converted = convertEventPayloadTimezone(event, allFamilyMembers);
-                            if (pendingAction.action_payload?.language) {
-                              converted.language = pendingAction.action_payload.language;
+                            if (language) {
+                              converted.language = language;
                               console.log('🔧 DEBUG: Added language to bulk event:', converted.language);
                             }
                             return converted;
                           });
                           console.log('🔧 DEBUG: After bulk conversion:', convertedEvents);
-                          await ScheduleEvent.bulkCreate(convertedEvents);
+                          createdEvents = await ScheduleEvent.bulkCreate(convertedEvents);
                         }
                         if (items && items.length) await WishlistItem.bulkCreate(items);
+                        
                         if ((tasks && tasks.length) || (events && events.length) || (items && items.length)) {
                           setConversation(prev => ([...prev, { role: 'assistant', content: 'Items added!' }]));
                         }
+                        
+                        // Note: Backend agent already includes task suggestions in its response
+                        // No additional AI analysis needed for events created via agent
+                        if (false && createdEvents.length > 0 && familyId) { // Disabled - agent handles this
+                          setPendingAction(null); // Clear current pending action first
+                          setIsProcessing(true);
+                          
+                          try {
+                            console.log('🤖 Analyzing created events for suggestions...');
+                            
+                            for (const event of createdEvents) {
+                              const analysis = await AIAgent.analyzeEvent(familyId, {
+                                ...event,
+                                language
+                              });
+                              
+                              console.log('🤖 Event analysis result:', analysis);
+                              
+                              // Collect task suggestions
+                              const suggestedTasks = [];
+                              if (analysis.suggested_tasks && analysis.suggested_tasks.length > 0) {
+                                for (const task of analysis.suggested_tasks) {
+                                  const assignedTo = task.assignee_id ? [task.assignee_id] : (task.assigned_to || []);
+                                  suggestedTasks.push({
+                                    title: task.title,
+                                    description: task.description,
+                                    due_date: task.due_date,
+                                    assigned_to: assignedTo,
+                                    status: 'pending',
+                                    priority: task.priority || 'medium',
+                                    family_id: familyId,
+                                    related_event_id: event.id,
+                                    ai_suggested: true,
+                                    selected: true
+                                  });
+                                }
+                              }
+                              
+                              // Show task suggestions if any
+                              if (suggestedTasks.length > 0) {
+                                setPendingAction({
+                                  action_payload: {
+                                    tasks: suggestedTasks,
+                                    events: [],
+                                    items: [],
+                                    language
+                                  }
+                                });
+                              }
+                            }
+                          } catch (analysisError) {
+                            console.error('🚨 Event analysis failed:', analysisError);
+                          } finally {
+                            setIsProcessing(false);
+                          }
+                          return;
+                        }
                       } catch (e) {
+                        console.error('🚨 Error in confirm handler:', e);
                         setConversation(prev => ([...prev, { role: 'assistant', content: 'Some items could not be saved.' }]));
                       } finally {
                         setPendingAction(null);
@@ -961,6 +1087,61 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
         </motion.div>
       )}
 
+      {/* Voice Status Indicator */}
+      {voiceEnabled && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mx-4 mb-2 p-3 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-lg"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {isListening ? (
+                <>
+                  <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
+                  <span className="text-sm text-purple-700 font-medium">
+                    {currentLanguage === 'nl' ? 'Luisteren...' : 'Listening...'}
+                  </span>
+                </>
+              ) : isPlaying ? (
+                <>
+                  <Volume2 className="w-4 h-4 text-purple-600 animate-pulse" />
+                  <span className="text-sm text-purple-700">
+                    {currentLanguage === 'nl' ? 'Spreken...' : 'Speaking...'}
+                  </span>
+                </>
+              ) : voiceProcessing ? (
+                <>
+                  <Loader2 className="w-4 h-4 text-purple-600 animate-spin" />
+                  <span className="text-sm text-purple-700">
+                    {currentLanguage === 'nl' ? 'Verwerken...' : 'Processing...'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <div className="w-3 h-3 bg-green-500 rounded-full" />
+                  <span className="text-sm text-purple-700">
+                    {currentLanguage === 'nl' ? 'Spraakassistent klaar' : 'Voice assistant ready'}
+                  </span>
+                </>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { disconnectVoice(); setVoiceEnabled(false); }}
+              className="text-purple-600 hover:text-purple-800"
+            >
+              <VolumeX className="w-4 h-4 mr-1" />
+              {currentLanguage === 'nl' ? 'Stop' : 'Stop'}
+            </Button>
+          </div>
+          {voiceTranscript && (
+            <p className="text-xs text-purple-600 mt-1 italic">"{voiceTranscript}"</p>
+          )}
+        </motion.div>
+      )}
+
       {/* Composer */}
       <div className="border-t p-2 sm:p-4 bg-white flex-shrink-0">
         <div className="relative flex items-center gap-2">
@@ -968,19 +1149,40 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={t('typeYourMessage') || "Type your message..."}
-            className="w-full pr-24 rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500 resize-none"
+            placeholder={voiceEnabled 
+              ? (currentLanguage === 'nl' ? 'Klik op de microfoon om te spreken...' : 'Click the microphone to speak...')
+              : (t('typeYourMessage') || "Type your message...")
+            }
+            className="w-full pr-28 rounded-lg border-gray-300 focus:ring-blue-500 focus:border-blue-500 resize-none"
             rows={1}
-            disabled={isProcessing || !!pendingAction}
+            disabled={isProcessing || !!pendingAction || isListening}
           />
           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
-            <Button variant="ghost" size="icon" className="text-gray-500 hover:text-blue-500" disabled>
-              <Mic className="w-5 h-5" />
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className={`transition-colors ${
+                isListening 
+                  ? 'text-red-500 hover:text-red-600 animate-pulse' 
+                  : voiceEnabled 
+                    ? 'text-purple-500 hover:text-purple-600' 
+                    : 'text-gray-500 hover:text-blue-500'
+              }`}
+              onClick={handleMicClick}
+              disabled={isProcessing || !!pendingAction}
+              title={voiceEnabled 
+                ? (isListening 
+                    ? (currentLanguage === 'nl' ? 'Stop luisteren' : 'Stop listening')
+                    : (currentLanguage === 'nl' ? 'Start luisteren' : 'Start listening'))
+                : (currentLanguage === 'nl' ? 'Spraak activeren' : 'Enable voice')
+              }
+            >
+              {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
             </Button>
             <Button
               size="sm"
               onClick={() => inputValue.trim() && handleSend(inputValue.trim())}
-              disabled={!inputValue.trim() || isProcessing || !!pendingAction}
+              disabled={!inputValue.trim() || isProcessing || !!pendingAction || isListening}
               className="bg-blue-600 hover:bg-blue-700"
             >
               <Send className="w-4 h-4" />

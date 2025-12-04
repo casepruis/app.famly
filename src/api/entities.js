@@ -86,7 +86,7 @@ const buildQueryParams = (params = {}, orderBy = null, limit = null) => {
 
 // api/http.ts (or wherever fetchWithAuth lives)
 // --- helpers ---
-export async function fetchWithAuth(path, options = {}) {
+export async function fetchWithAuth(path, options = {}, _retry = false) {
   // Track API call
   const method = options.method || 'GET';
   apiCallTracker.logCall(method, path, options.body);
@@ -132,6 +132,27 @@ export async function fetchWithAuth(path, options = {}) {
   }
 
   if (!res.ok) {
+    // Handle token expiration (401) or token error (403) by trying to refresh
+    if ((res.status === 401 || res.status === 403) && !_retry) {
+      console.log('🔄 [AUTH] Token expired or invalid, attempting refresh...');
+      try {
+        const { authClient } = await import('./authClient.js');
+        const refreshed = await authClient.refreshToken?.();
+        if (refreshed) {
+          console.log('✅ [AUTH] Token refreshed, retrying request');
+          return fetchWithAuth(path, options, true); // Retry with new token
+        }
+      } catch (e) {
+        console.error('🚨 [AUTH] Token refresh failed:', e);
+      }
+      // Refresh failed - redirect to login
+      console.log('🚨 [AUTH] Token refresh failed, redirecting to login');
+      localStorage.removeItem('famlyai_token');
+      localStorage.removeItem('famlyai_user');
+      window.location.href = '/';
+      throw new Error('Session expired. Please sign in again.');
+    }
+    
     // Try to surface a useful message
     let errText = "";
     try {

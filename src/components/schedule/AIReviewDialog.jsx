@@ -18,27 +18,18 @@ export default function AIReviewDialog({ isOpen, onClose, reviewData, onConfirm 
   const { family } = useFamilyData();
 
   useEffect(() => {
-    console.log('🔍 [DEBUG] AIReviewDialog useEffect triggered. reviewData:', reviewData);
-    console.log('🔍 [DEBUG] reviewData.aiResult:', reviewData?.aiResult);
-    console.log('🔍 [DEBUG] reviewData.planningInsights:', reviewData?.planningInsights);
-    console.log('🔍 [DEBUG] isOpen:', isOpen);
-    
     if (reviewData && isOpen) {
-      console.log('🔍 [DEBUG] Review data exists and dialog is open, resetting selections');
-      // Always start with no tasks selected when the dialog opens with new data
+      // Reset selections when dialog opens with new data
       setSelectedTaskIndices([]);
       setSelectedInsightIndices([]);
       
-      // Immediately use planning insights from backend response - no artificial delay
+      // Use planning insights from backend response
       if (reviewData.planningInsights && reviewData.planningInsights.length > 0) {
-        console.log('🔍 [DEBUG] Using planning insights from backend response:', reviewData.planningInsights.length);
         setPlanningInsights(reviewData.planningInsights);
-        setLoadingInsights(false);
       } else {
-        console.log('🔍 [DEBUG] No planning insights in response');
         setPlanningInsights([]);
-        setLoadingInsights(false);
       }
+      setLoadingInsights(false);
     }
   }, [reviewData, isOpen]);
 
@@ -54,19 +45,10 @@ export default function AIReviewDialog({ isOpen, onClose, reviewData, onConfirm 
   };
 
   const handleTaskToggle = (taskIndex, checked) => {
-    console.log('🔍 [AIREVIEWDIALOG] handleTaskToggle called:', { taskIndex, checked });
     if (checked) {
-      setSelectedTaskIndices(prev => {
-        const newIndices = [...prev, taskIndex];
-        console.log('🔍 [AIREVIEWDIALOG] Adding task index, new selection:', newIndices);
-        return newIndices;
-      });
+      setSelectedTaskIndices(prev => [...prev, taskIndex]);
     } else {
-      setSelectedTaskIndices(prev => {
-        const newIndices = prev.filter(index => index !== taskIndex);
-        console.log('🔍 [AIREVIEWDIALOG] Removing task index, new selection:', newIndices);
-        return newIndices;
-      });
+      setSelectedTaskIndices(prev => prev.filter(index => index !== taskIndex));
     }
   };
 
@@ -79,22 +61,12 @@ export default function AIReviewDialog({ isOpen, onClose, reviewData, onConfirm 
   };
   
   const handleConfirm = () => {
-    console.log('🔍 [AIREVIEWDIALOG] handleConfirm called');
-    console.log('🔍 [AIREVIEWDIALOG] selectedTaskIndices:', selectedTaskIndices);
-    console.log('🔍 [AIREVIEWDIALOG] selectedInsightIndices:', selectedInsightIndices);
-    console.log('🔍 [AIREVIEWDIALOG] reviewData:', reviewData);
-    console.log('🔍 [AIREVIEWDIALOG] family:', family);
-    
     try {
       let finalEvent = { ...reviewData.originalEvent };
     
       const tasksToCreate = selectedTaskIndices.map(index => {
         const task = reviewData.aiResult?.suggestedTasks?.[index];
-        console.log('🔍 [AIREVIEWDIALOG] Processing task at index', index, ':', task);
-        if (!task) {
-          console.warn('🚨 [AIREVIEWDIALOG] No task found at index', index);
-          return null;
-        }
+        if (!task) return null;
       
         // Ensure task has family_id and all required schema fields
         const normalizedTask = {
@@ -113,22 +85,13 @@ export default function AIReviewDialog({ isOpen, onClose, reviewData, onConfirm 
           related_event_id: task.related_event_id || null
         };
       
-        console.log('🔍 [AIREVIEWDIALOG] Normalized task:', normalizedTask);
-      
         // Validate required fields
-        if (!normalizedTask.title) {
-          console.error('🚨 [AIREVIEWDIALOG] Task missing title:', normalizedTask);
-          return null;
-        }
-        if (!normalizedTask.family_id) {
-          console.error('🚨 [AIREVIEWDIALOG] Task missing family_id:', normalizedTask);
+        if (!normalizedTask.title || !normalizedTask.family_id) {
           return null;
         }
       
         return normalizedTask;
       }).filter(Boolean);
-    
-      console.log('🔍 [AIREVIEWDIALOG] Final tasksToCreate:', tasksToCreate);
     
     // Add planning insight actions as tasks
     const insightTasks = selectedInsightIndices.map(key => {
@@ -139,6 +102,19 @@ export default function AIReviewDialog({ isOpen, onClose, reviewData, onConfirm 
       // Convert planning action to task format with proper date handling
       const dueDate = action.deadline ? new Date(action.deadline) : null;
       
+      // Map insight categories to valid task categories
+      const categoryMapping = {
+        'childcare': 'family',
+        'scheduling': 'errands',
+        'opportunities': 'personal',
+        'conflicts': 'errands',
+        'family_time': 'family',
+        'health': 'personal',
+        'education': 'homework',
+        'finance': 'errands'
+      };
+      const taskCategory = categoryMapping[action.category] || 'family';
+      
       return {
         title: action.title,
         description: action.description,
@@ -146,7 +122,7 @@ export default function AIReviewDialog({ isOpen, onClose, reviewData, onConfirm 
         ai_suggested: true,
         priority: action.priority || 'medium',
         due_date: dueDate ? dueDate.toISOString() : null, // Send full ISO string for backend
-        category: action.category || 'family',
+        category: taskCategory,
         status: 'todo', // Ensure status is set
         assigned_to: [], // Ensure assigned_to is array
         points: 0, // Set default points
@@ -165,48 +141,25 @@ export default function AIReviewDialog({ isOpen, onClose, reviewData, onConfirm 
     });
     
     const allTasks = [...tasksToCreate, ...insightTasks];
-    console.log('🔍 [AIREVIEWDIALOG] Final allTasks array:', allTasks);
-    console.log('🔍 [AIREVIEWDIALOG] Number of tasks to create:', allTasks.length);
-    console.log('🔍 [AIREVIEWDIALOG] Regular tasks count:', tasksToCreate.length);
-    console.log('🔍 [AIREVIEWDIALOG] Insight tasks count:', insightTasks.length);
-    console.log('🔍 [AIREVIEWDIALOG] Family ID for tasks:', family?.id);
-    
-    // Validate all tasks before sending
-    const invalidTasks = allTasks.filter(task => !task.title || !task.family_id);
-    if (invalidTasks.length > 0) {
-      console.error('🚨 [AIREVIEWDIALOG] Invalid tasks detected:', invalidTasks);
-    }
-    
-    console.log('🔍 [AIREVIEWDIALOG] Calling onConfirm with finalEvent and allTasks');
     onConfirm(finalEvent, allTasks);
     
     } catch (error) {
-      console.error('🚨 [AIREVIEWDIALOG] Error in handleConfirm:', error);
+      console.error('[AIReviewDialog] Error in handleConfirm:', error);
       // Still call onConfirm but with empty tasks to at least save the event
       onConfirm({ ...reviewData.originalEvent }, []);
     }
   };
   
   if (!isOpen || !reviewData) {
-    console.log('🔍 [DEBUG] Dialog not rendering - isOpen:', isOpen, 'reviewData:', !!reviewData);
     return null;
   }
 
-  console.log('🔍 [DEBUG] Dialog is rendering! reviewData:', reviewData);
-  console.log('🔍 [DEBUG] Full reviewData structure:', JSON.stringify(reviewData, null, 2));
-
   const { aiResult } = reviewData;
-  console.log('🔍 [DEBUG] aiResult:', aiResult);
-  console.log('🔍 [DEBUG] aiResult.suggestedTasks:', aiResult?.suggestedTasks);
   
   const totalTasks = aiResult?.suggestedTasks?.length || 0;
   const totalInsightActions = planningInsights.reduce((sum, insight) => sum + (insight.actions?.length || 0), 0);
   const totalSuggestions = totalTasks + totalInsightActions;
   const selectedCount = selectedTaskIndices.length + selectedInsightIndices.length;
-  
-  console.log('🔍 [DEBUG] totalTasks:', totalTasks, 'totalSuggestions:', totalSuggestions);
-  console.log('🔍 [DEBUG] planningInsights:', planningInsights.length);
-  console.log('🔍 [DEBUG] totalInsightActions:', totalInsightActions);
   
   const getSeverityIcon = (severity) => {
     switch (severity) {
@@ -231,11 +184,6 @@ export default function AIReviewDialog({ isOpen, onClose, reviewData, onConfirm 
         </DialogHeader>
         
         <div className="flex-1 overflow-y-auto py-4 space-y-4">
-          {/* Debug section - remove after fixing */}
-          <div className="bg-gray-100 p-2 text-xs rounded">
-            <strong>DEBUG:</strong> Tasks: {totalTasks}, Insights: {planningInsights.length}, Total: {totalSuggestions}
-          </div>
-          
           {aiResult.aiMessage && (
             <p className="text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">
               {aiResult.aiMessage}
@@ -285,7 +233,7 @@ export default function AIReviewDialog({ isOpen, onClose, reviewData, onConfirm 
             <div className="space-y-3">
               <h4 className="font-semibold text-gray-800 flex items-center gap-2">
                 <Brain className="w-4 h-4 text-purple-500" />
-                Planning suggesties ({totalInsightActions}):
+                Planning inzichten ({planningInsights.length}):
               </h4>
               {planningInsights.map((insight, insightIndex) => (
                 <div key={insightIndex} className="bg-purple-50 border border-purple-200 rounded-lg p-3">
@@ -303,6 +251,10 @@ export default function AIReviewDialog({ isOpen, onClose, reviewData, onConfirm 
                       ×
                     </Button>
                   </div>
+                  {/* Show description if present */}
+                  {insight.description && (
+                    <p className="text-sm text-purple-700 mb-2">{insight.description}</p>
+                  )}
                   {insight.message && (
                     <p className="text-sm text-purple-700 mb-2">{insight.message}</p>
                   )}

@@ -10,7 +10,8 @@ import Index from '@/pages/Index';
 import RequireAuth from '@/pages/RequireAuth';
 import SignIn from '@/pages/SignIn';
 import SignUp from '@/pages/SignUp';
-import Dashboard from '@/pages/Dashboard';
+// import Dashboard from '@/pages/Dashboard';  // Original
+import Dashboard from '@/pages/DashboardNew';  // Testing unified UX
 import FamilySetup from '@/pages/FamilySetup';
 import Schedule from '@/pages/Schedule';
 import Tasks from '@/pages/Tasks';

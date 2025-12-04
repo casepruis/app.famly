@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { User, Family, FamilyMember, ScheduleEvent, Task } from '@/api/entities';
-import { AIAgent } from '@/api/aiAgent';
 import { toast } from "@/components/ui/use-toast";
 
 const FamilyDataContext = createContext(null);
@@ -26,30 +25,8 @@ export function FamilyDataProvider({ children }) {
     }
   }, [localStorage.getItem('famlyai_token')]);
 
-  // Async AI agent analysis trigger
-  const triggerAIAgentAnalysis = async (eventData) => {
-    try {
-      if (!family?.id) return;
-      
-      console.log('[AI-AGENT] Triggering analysis for event:', eventData.title);
-      
-      // Call AI agent asynchronously - don't block UI
-      setTimeout(async () => {
-        try {
-          const analysis = await AIAgent.analyzeEvent(family.id, eventData);
-          console.log('[AI-AGENT] Analysis complete:', analysis);
-          
-          // The analysis results will come back via WebSocket
-          // so we don't need to handle them here
-        } catch (error) {
-          console.log('[AI-AGENT] Analysis failed (non-blocking):', error);
-        }
-      }, 100); // Small delay to avoid blocking the UI
-      
-    } catch (error) {
-      console.log('[AI-AGENT] Analysis setup failed:', error);
-    }
-  };
+  // AI agent analysis is now handled by eventCreationService
+  // No duplicate calls from context
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -107,26 +84,16 @@ export function FamilyDataProvider({ children }) {
           console.log('🔍 [WS] Schedule event update:', type, payload?.id);
           setEvents(prevEvents => {
             if (type === "schedule_event_created") {
-              console.log('[WS][DEBUG] schedule_event_created received. Payload:', payload);
-              console.log('[WS][DEBUG] Current prevEvents:', prevEvents);
               const exists = prevEvents.some(ev => ev.id === payload.id);
-              console.log('[WS][DEBUG] schedule_event_created: Already exists?', exists, 'Payload ID:', payload.id, 'All IDs:', prevEvents.map(ev => ev.id));
               if (exists) {
-                console.log('[WS][DEBUG] Event already exists, not adding.');
                 return prevEvents;
               }
-              const next = [...prevEvents, payload];
-              console.log('[WS][DEBUG] Events after create:', next);
-              
-              // Trigger AI agent analysis asynchronously
-              triggerAIAgentAnalysis(payload);
-              
-              return next;
+              // Just add the event - NO duplicate AI call here
+              // The eventCreationService already handles AI analysis
+              return [...prevEvents, payload];
             }
             if (type === "schedule_event_updated") {
-              const next = prevEvents.map(ev => ev.id === payload.id ? { ...ev, ...payload } : ev);
-              console.log('[WS] schedule_event_updated:', payload, 'Events after update:', next);
-              return next;
+              return prevEvents.map(ev => ev.id === payload.id ? { ...ev, ...payload } : ev);
             }
             if (type === "schedule_event_deleted") {
               const next = prevEvents.filter(ev => ev.id !== payload.id);
@@ -194,14 +161,9 @@ export function FamilyDataProvider({ children }) {
             });
           }
         }
-        // Always call loadData to ensure consistency
-        if ([
-          "family_member_created","family_member_updated","family_member_deleted",
-          "schedule_event_created","schedule_event_updated","schedule_event_deleted",
-          "task_created","task_updated","task_deleted",
-          "wishlist_item_created","wishlist_item_updated","wishlist_item_deleted",
-          "agent_insight_created"
-        ].includes(type)) {
+        // REMOVED: loadData() call - WebSocket handlers already update state directly
+        // Only reload for family member changes (structure changes need full reload)
+        if (["family_member_created","family_member_updated","family_member_deleted"].includes(type)) {
           loadData();
         }
       } catch {}

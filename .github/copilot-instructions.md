@@ -8,6 +8,12 @@
 - UI components are organized by domain in `src/components/` (e.g., `ai/`, `chat/`, `dashboard/`, `schedule/`).
 - Static assets are in `public/`.
 
+## Critical Rules (MUST FOLLOW)
+1. **Frontend NEVER calls LLM directly** - All AI/LLM calls must go through the backend API. The frontend only calls backend endpoints (e.g., `/api/ai-agent/...`), never OpenAI or other LLM APIs directly.
+2. **No duplicated code** - Extract shared logic into hooks (`src/hooks/`), services (`src/services/`), or utility functions (`src/lib/` or `src/utils/`). If you see similar code in multiple places, refactor it.
+3. **Single source of truth** - Each piece of data should have one canonical source. Use `FamilyDataContext` for family/events/tasks data.
+4. **Minimize API calls** - Batch requests where possible. Don't fetch data that's already available in context.
+
 ## Key Workflows
 - **Install dependencies:** `npm install`
 - **Start dev server:** `npm run dev`

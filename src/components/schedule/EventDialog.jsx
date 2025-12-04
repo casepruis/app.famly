@@ -99,11 +99,6 @@ const TimePicker = ({ value, onChange, placeholder }) => {
 
 
 const analyzeEventWithAI = async (eventData, familyMembers, currentLanguage, t) => {
-    console.log('🔍 [EVENT-AI] analyzeEventWithAI called with:', {
-        eventTitle: eventData.title,
-        currentLanguage: currentLanguage
-    });
-    
     try {
         // Generate tasks using improved AI prompt for comprehensive suggestions
         const llm = await InvokeLLMNormalized({
@@ -153,7 +148,7 @@ Provide a short title and practical, family-context-aware tasks:`,
             typeof t === "string" ? { title: t } : t
         );
 
-        console.log('🔍 [EVENT-AI] Generated tasks:', normalizedSuggestedTasks);
+        
         
         return {
             suggestedTasks: normalizedSuggestedTasks,
@@ -202,14 +197,13 @@ const generateShortTitleWithAI = async (eventData, currentLanguage) => {
     }
 };
 
-export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyMembers, initialData = null, selectedDate = null, selectedHour = null, preselectedMemberId = null, userLoaded = true }) {
+export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyMembers, initialData = null, selectedDate = null, selectedHour = null, preselectedMemberId = null, userLoaded = true, externalProcessing = false }) {
     const { t, currentLanguage } = useLanguage();
-    
-    // Debug language on every render
-    console.log('🌍 [EVENTDIALOG] Current language from useLanguage():', currentLanguage);
-    
     const { toast } = useToast();
-    const [isProcessing, setIsProcessing] = useState(false);
+    const [isLocalProcessing, setIsLocalProcessing] = useState(false);
+    
+    // Combined processing state - either local or external (from parent hook)
+    const isProcessing = isLocalProcessing || externalProcessing;
     const [showRecurringOptions, setShowRecurringOptions] = useState(false);
     const [eventData, setEventData] = useState({
         title: '',
@@ -295,7 +289,7 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
             return;
         }
 
-    setIsProcessing(true);
+    setIsLocalProcessing(true);
     setAiLoading(true);
 
         try {
@@ -327,7 +321,6 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
 
             // Add language to event data so backend can use it for task generation
             processedEventData.language = currentLanguage;
-            console.log('🔍 [EVENTDIALOG] Adding language to event data:', currentLanguage);
 
             // Determine edit type based on whether this is an update or create
             const editType = initialData ? (showRecurringOptions ? 'series' : 'single') : 'single';
@@ -335,14 +328,11 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
             // For new events, let the parent handle AI analysis (EventCreationService)
             // For existing events, do the AI analysis here as before
             if (!initialData) {
-                console.log('🔍 [EVENTDIALOG] New event - letting parent handle AI analysis');
                 onSave(processedEventData, null, editType);
             } else {
-                console.log('🔍 [EVENTDIALOG] Existing event - doing AI analysis in dialog');
                 let aiResult = null;
                 try {
                     aiResult = await analyzeEventWithAI(processedEventData, familyMembers, currentLanguage, t);
-                    console.log('🔍 [EVENTDIALOG] AI analysis completed:', aiResult);
                 } catch (aiError) {
                     console.error('🚨 [EVENTDIALOG] AI analysis failed, continuing without suggestions:', aiError);
                     aiResult = {
@@ -362,8 +352,7 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
                 duration: 5000 
             });
         } finally {
-            console.log('🔍 [EVENTDIALOG] Resetting loading states');
-            setIsProcessing(false);
+            setIsLocalProcessing(false);
             setAiLoading(false);
         }
     };
@@ -685,7 +674,7 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
                                         variant="secondary"
                                         onClick={async () => {
                                             try {
-                                                setIsProcessing(true);
+                                                setIsLocalProcessing(true);
                                                 await ScheduleEvent.toTask(initialData.id);
                                                 await ScheduleEvent.delete(initialData.id);
                                                 if (typeof window !== 'undefined' && window?.famlyToast) {
@@ -697,7 +686,7 @@ export default function EventDialog({ isOpen, onClose, onSave, onDelete, familyM
                                                     window.famlyToast.error(t('eventConvertToTaskFailed') || 'Failed to convert event to task.');
                                                 }
                                             } finally {
-                                                setIsProcessing(false);
+                                                setIsLocalProcessing(false);
                                             }
                                         }}
                                         disabled={isProcessing}

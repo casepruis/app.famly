@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Loader2 } from "lucide-react";
 
 import InlineTaskReview from "../chat/InlineTaskReview";
 import InlineEventReview from "../schedule/InlineEventReview";
@@ -16,8 +17,10 @@ export default function ActionReviewPanel({
   onConfirm,
   confirmLabel = "Add selected",
   cancelLabel = "Cancel",
+  isLoading = false,
 }) {
   // Local selection state
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Tasks: use InlineTaskReview for inline editing/assignment
   const [editableTasks, setEditableTasks] = useState(
@@ -95,18 +98,25 @@ export default function ActionReviewPanel({
         </div>
       )}
       <div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-2 pt-4 border-t border-blue-100 mt-4">
-        <Button variant="ghost" size="sm" onClick={onCancel} className="w-full sm:w-auto">{cancelLabel}</Button>
+        <Button variant="ghost" size="sm" onClick={onCancel} disabled={isSubmitting || isLoading} className="w-full sm:w-auto">{cancelLabel}</Button>
         <Button
           size="sm"
           className="bg-blue-600 hover:bg-blue-700 font-semibold px-6 w-full sm:w-auto"
-          onClick={() => {
-            onConfirm({
-              tasks: editableTasks.filter(t => t.selected).map(({ selected, ...rest }) => rest),
-              events: editableEvents.filter(e => e.selected).map(({ selected, ...rest }) => rest),
-              items: editableWishlist.filter(w => w.selected).map(({ selected, ...rest }) => rest),
-            });
+          disabled={isSubmitting || isLoading}
+          onClick={async () => {
+            setIsSubmitting(true);
+            try {
+              await onConfirm({
+                tasks: editableTasks.filter(t => t.selected).map(({ selected, ...rest }) => rest),
+                events: editableEvents.filter(e => e.selected).map(({ selected, ...rest }) => rest),
+                items: editableWishlist.filter(w => w.selected).map(({ selected, ...rest }) => rest),
+              });
+            } finally {
+              setIsSubmitting(false);
+            }
           }}
         >
+          {(isSubmitting || isLoading) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {confirmLabel}
         </Button>
       </div>
