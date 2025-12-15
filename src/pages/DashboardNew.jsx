@@ -26,7 +26,6 @@ import AIReviewDialog from "@/components/schedule/AIReviewDialog";
 import TaskForm from "@/components/tasks/TaskForm";
 import Joyride from "../components/common/Joyride";
 import FunFactCard from "../components/dashboard/FunFactCard";
-import InsightDebugPanel from "../components/InsightDebugPanel";
 
 const tourSteps = (t) => [
   { target: '#weekly-schedule-preview', title: t('weeklySchedule') || 'Weekly Schedule', content: t('tour_weeklySchedule_content') || 'Get a quick overview of your family\'s week at a glance. Click to navigate to the full schedule.' },
@@ -318,9 +317,6 @@ export default function Dashboard() {
           <FunFactCard />
         </motion.div>
       </div> */}
-      
-      {/* Debug Panel for testing */}
-      <InsightDebugPanel />
     </div>
   );
 }

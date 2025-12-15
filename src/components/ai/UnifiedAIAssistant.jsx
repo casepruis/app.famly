@@ -5,7 +5,7 @@ import ActionReviewPanel from '../common/ActionReviewPanel';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Mic, MicOff, Send, Bot, Loader2, MessageCircle, Check, X, Volume2, VolumeX } from "lucide-react";
+import { Mic, MicOff, Send, Bot, Loader2, MessageCircle, Check, X, Volume2, VolumeX, StopCircle } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { useLanguage } from "@/components/common/LanguageProvider";
@@ -206,6 +206,7 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
   const [languageMismatch, setLanguageMismatch] = useState(null); // {detectedLang, userMessage}
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState('');
+  const voiceResponseRef = useRef('');
   // useAgents removed - always use backend agents (no direct LLM calls from frontend)
   const conversationEndRef = useRef(null);
 
@@ -220,14 +221,29 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
     startListening,
     stopListening,
     sendText: sendVoiceText,
+    cancelResponse: cancelVoiceResponse,
   } = useVoiceAssistant({
     language: currentLanguage,
     onTranscript: useCallback((text, role) => {
       if (role === 'user') {
+        // User transcript is complete
         setVoiceTranscript(text);
         setConversation(prev => [...prev, { role: 'user', content: text }]);
+        // Reset accumulator for next response
+        voiceResponseRef.current = '';
       } else {
-        setConversation(prev => [...prev, { role: 'assistant', content: text }]);
+        // Assistant transcript comes as deltas, accumulate them
+        voiceResponseRef.current += text;
+        // Update the last assistant message or add new one
+        setConversation(prev => {
+          const lastIdx = prev.length - 1;
+          if (lastIdx >= 0 && prev[lastIdx].role === 'assistant' && prev[lastIdx].isVoice) {
+            // Update existing voice message
+            return [...prev.slice(0, lastIdx), { ...prev[lastIdx], content: voiceResponseRef.current }];
+          }
+          // Add new voice message
+          return [...prev, { role: 'assistant', content: voiceResponseRef.current, isVoice: true }];
+        });
       }
     }, []),
     onFunctionCall: useCallback((name, result) => {
@@ -238,6 +254,7 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
     }, [onUpdate]),
     onError: useCallback((error) => {
       console.error('🎤 Voice error:', error);
+      voiceResponseRef.current = '';
       setConversation(prev => [...prev, { 
         role: 'assistant', 
         content: currentLanguage === 'nl' 
@@ -258,10 +275,12 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
     }
   }, [voiceEnabled, connectVoice, disconnectVoice]);
 
-  // Handle microphone button
+  // Handle microphone button - single click to connect AND start listening
   const handleMicClick = useCallback(async () => {
     if (!voiceEnabled) {
       await toggleVoice();
+      // Start listening immediately after connecting
+      startListening();
       return;
     }
     if (isListening) {
@@ -540,24 +559,32 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
     setPendingAction(null);
     setLanguageMismatch(null);
 
-    // Detect language of user input using LLM
-    const detectedLang = await detectLanguage(messageText);
-    console.log('🌐 Language detection:', {
-      input: messageText,
-      detected: detectedLang,
-      userPreference: currentLanguage
-    });
-
-    // Check for language mismatch and prompt user
-    if (shouldPromptLanguageSwitch(detectedLang, currentLanguage)) {
-      console.log('🌐 Language mismatch detected, showing prompt');
-      setLanguageMismatch({
-        detectedLang,
-        userMessage: messageText,
-        detectedLangName: getLanguageName(detectedLang, currentLanguage),
-        preferredLangName: getLanguageName(currentLanguage, currentLanguage)
+    // Only detect language for messages with 4+ words (skip greetings like "hoi", "hey")
+    const wordCount = messageText.trim().split(/\s+/).length;
+    let detectedLang = currentLanguage; // Default to current language
+    
+    if (wordCount >= 4) {
+      detectedLang = await detectLanguage(messageText);
+      console.log('🌐 Language detection:', {
+        input: messageText,
+        detected: detectedLang,
+        userPreference: currentLanguage,
+        wordCount
       });
-      return; // Stop processing, wait for user choice
+
+      // Check for language mismatch and prompt user
+      if (shouldPromptLanguageSwitch(detectedLang, currentLanguage)) {
+        console.log('🌐 Language mismatch detected, showing prompt');
+        setLanguageMismatch({
+          detectedLang,
+          userMessage: messageText,
+          detectedLangName: getLanguageName(detectedLang, currentLanguage),
+          preferredLangName: getLanguageName(currentLanguage, currentLanguage)
+        });
+        return; // Stop processing, wait for user choice
+      }
+    } else {
+      console.log('🌐 Skipping language detection for short message:', { wordCount, messageText });
     }
 
     // Add user message to conversation
@@ -1126,15 +1153,27 @@ export default function UnifiedAIAssistant({ conversationContext, allFamilyMembe
                 </>
               )}
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => { disconnectVoice(); setVoiceEnabled(false); }}
-              className="text-purple-600 hover:text-purple-800"
-            >
-              <VolumeX className="w-4 h-4 mr-1" />
-              {currentLanguage === 'nl' ? 'Stop' : 'Stop'}
-            </Button>
+            {(isPlaying || voiceProcessing) ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={cancelVoiceResponse}
+                className="text-orange-600 hover:text-orange-800"
+              >
+                <StopCircle className="w-4 h-4 mr-1" />
+                {currentLanguage === 'nl' ? 'Onderbreek' : 'Interrupt'}
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { disconnectVoice(); setVoiceEnabled(false); }}
+                className="text-purple-600 hover:text-purple-800"
+              >
+                <VolumeX className="w-4 h-4 mr-1" />
+                {currentLanguage === 'nl' ? 'Sluit' : 'Close'}
+              </Button>
+            )}
           </div>
           {voiceTranscript && (
             <p className="text-xs text-purple-600 mt-1 italic">"{voiceTranscript}"</p>

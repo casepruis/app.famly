@@ -32,6 +32,7 @@ export function useVoiceAssistant({
   const processorRef = useRef(null);
   const audioQueueRef = useRef([]);
   const isPlayingRef = useRef(false);
+  const currentSourceRef = useRef(null); // Track current audio source for interruption
 
   // Initialize audio context
   const initAudioContext = useCallback(async () => {
@@ -95,8 +96,11 @@ export function useVoiceAssistant({
     
     const audioContext = await initAudioContext();
     
-    while (audioQueueRef.current.length > 0) {
+    while (audioQueueRef.current.length > 0 && isPlayingRef.current) {
       const audioData = audioQueueRef.current.shift();
+      
+      // Check if interrupted
+      if (!isPlayingRef.current) break;
       
       try {
         // Decode base64 to PCM16
@@ -112,13 +116,17 @@ export function useVoiceAssistant({
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
+        currentSourceRef.current = source; // Store for interruption
         
         await new Promise((resolve) => {
           source.onended = resolve;
           source.start();
         });
+        
+        currentSourceRef.current = null;
       } catch (e) {
         console.error('Audio playback error:', e);
+        currentSourceRef.current = null;
       }
     }
     
@@ -137,7 +145,8 @@ export function useVoiceAssistant({
           break;
           
         case 'audio':
-          // Queue audio for playback
+          // Queue audio for playback - receiving audio means processing is done
+          setIsProcessing(false);
           audioQueueRef.current.push(data.data);
           playAudioQueue();
           break;
@@ -145,6 +154,29 @@ export function useVoiceAssistant({
         case 'transcript':
           setIsProcessing(data.role === 'user');
           onTranscript?.(data.data, data.role);
+          break;
+        
+        case 'response_done':
+          // Response complete, clear processing state
+          setIsProcessing(false);
+          break;
+        
+        case 'interrupt':
+          // User started speaking - stop any audio playback immediately
+          console.log('🎤 Interrupt received - stopping audio');
+          audioQueueRef.current = []; // Clear audio queue
+          isPlayingRef.current = false;
+          // Stop the currently playing audio source
+          if (currentSourceRef.current) {
+            try {
+              currentSourceRef.current.stop();
+            } catch (e) {
+              // May already be stopped
+            }
+            currentSourceRef.current = null;
+          }
+          setIsPlaying(false);
+          setIsProcessing(false);
           break;
           
         case 'function_call':
@@ -162,40 +194,73 @@ export function useVoiceAssistant({
   }, [playAudioQueue, onTranscript, onFunctionCall, onError]);
 
   // Connect to realtime WebSocket
-  const connect = useCallback(async () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
-    
-    const token = localStorage.getItem('famlyai_token');
-    if (!token) {
-      onError?.('Not authenticated');
-      return;
-    }
-    
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsBase = import.meta?.env?.VITE_WS_BASE || `${protocol}//${host}`;
-    
-    const ws = new WebSocket(`${wsBase}/realtime?token=${encodeURIComponent(token)}&language=${language}`);
-    
-    ws.onopen = () => {
-      console.log('🎤 Connected to voice service');
-      setIsConnected(true);
-    };
-    
-    ws.onmessage = handleMessage;
-    
-    ws.onerror = (e) => {
-      console.error('WebSocket error:', e);
-      onError?.('Connection error');
-    };
-    
-    ws.onclose = () => {
-      console.log('🎤 Disconnected from voice service');
-      setIsConnected(false);
-      setIsListening(false);
-    };
-    
-    wsRef.current = ws;
+  const connect = useCallback(() => {
+    return new Promise((resolve, reject) => {
+      // If already connected, just resolve
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        console.log('🎤 Already connected');
+        resolve();
+        return;
+      }
+      
+      // Close any existing connection first (handles CONNECTING/CLOSING states)
+      if (wsRef.current) {
+        console.log('🎤 Closing existing connection before reconnecting');
+        try {
+          wsRef.current.close();
+        } catch (e) {
+          // Ignore
+        }
+        wsRef.current = null;
+      }
+      
+      const token = localStorage.getItem('famlyai_token');
+      if (!token) {
+        onError?.('Not authenticated');
+        reject(new Error('Not authenticated'));
+        return;
+      }
+      
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      const wsBase = import.meta?.env?.VITE_WS_BASE || `${protocol}//${host}`;
+      
+      console.log('🎤 Creating WebSocket connection...');
+      const ws = new WebSocket(`${wsBase}/realtime?token=${encodeURIComponent(token)}&language=${language}`);
+      
+      const timeout = setTimeout(() => {
+        ws.close();
+        reject(new Error('Connection timeout'));
+      }, 10000); // 10 second timeout
+      
+      ws.onopen = () => {
+        console.log('🎤 Connected to voice service');
+        clearTimeout(timeout);
+        setIsConnected(true);
+        resolve();
+      };
+      
+      ws.onmessage = handleMessage;
+      
+      ws.onerror = (e) => {
+        console.error('WebSocket error:', e);
+        clearTimeout(timeout);
+        setIsProcessing(false);
+        onError?.('Connection error');
+        reject(new Error('Connection error'));
+      };
+      
+      ws.onclose = () => {
+        console.log('🎤 Disconnected from voice service');
+        clearTimeout(timeout);
+        setIsConnected(false);
+        setIsListening(false);
+        setIsProcessing(false);
+        setIsPlaying(false);
+      };
+      
+      wsRef.current = ws;
+    });
   }, [language, handleMessage, onError]);
 
   // Disconnect
@@ -206,17 +271,26 @@ export function useVoiceAssistant({
     }
     stopListening();
     setIsConnected(false);
+    setIsProcessing(false);
+    setIsPlaying(false);
   }, []);
 
   // Start listening (microphone)
   const startListening = useCallback(async () => {
+    console.log('🎤 startListening called', { 
+      wsRef: !!wsRef.current,
+      wsState: wsRef.current?.readyState,
+      WebSocket_OPEN: WebSocket.OPEN 
+    });
+    
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      await connect();
-      // Wait for connection
-      await new Promise(resolve => setTimeout(resolve, 500));
+      console.log('🎤 WebSocket not ready, cannot start listening');
+      onError?.('Not connected to voice service');
+      return;
     }
     
     try {
+      console.log('🎤 Requesting microphone access...');
       const audioContext = await initAudioContext();
       
       // Get microphone stream
@@ -229,6 +303,7 @@ export function useVoiceAssistant({
         }
       });
       
+      console.log('🎤 Microphone access granted');
       mediaStreamRef.current = stream;
       
       // Create audio processing pipeline
@@ -300,6 +375,30 @@ export function useVoiceAssistant({
     setIsProcessing(true);
   }, [onError]);
 
+  // Cancel the current response (user interruption)
+  const cancelResponse = useCallback(() => {
+    // Stop audio playback
+    audioQueueRef.current = [];
+    isPlayingRef.current = false;
+    if (currentSourceRef.current) {
+      try {
+        currentSourceRef.current.stop();
+      } catch (e) {
+        // May already be stopped
+      }
+      currentSourceRef.current = null;
+    }
+    setIsPlaying(false);
+    setIsProcessing(false);
+    
+    // Tell server to cancel
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'cancel' }));
+    }
+    
+    console.log('🎤 Response cancelled by user');
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -323,6 +422,7 @@ export function useVoiceAssistant({
     startListening,
     stopListening,
     sendText,
+    cancelResponse,
   };
 }
 

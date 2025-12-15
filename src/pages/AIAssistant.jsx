@@ -8,6 +8,7 @@ import { ArrowLeft } from "lucide-react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import Joyride from "../components/common/Joyride";
+import { useFamilyData } from "@/hooks/FamilyDataContext";
 
 import UnifiedAIAssistant from "../components/ai/UnifiedAIAssistant";
 
@@ -21,6 +22,7 @@ export default function AIAssistant() {
   const [isLoading, setIsLoading] = useState(true);
   const [runTour, setRunTour] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
+  const { reload: reloadFamilyData } = useFamilyData();
 
   const { t } = useLanguage();
 
@@ -92,7 +94,7 @@ export default function AIAssistant() {
           conversationContext={conversationContext}
           allFamilyMembers={familyMembers}
           user={user}
-          onUpdate={() => {}}
+          onUpdate={reloadFamilyData}
         />
       </div>
     </div>

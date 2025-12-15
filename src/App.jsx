@@ -5,6 +5,7 @@ import { LanguageProvider } from '@/components/common/LanguageProvider';
 import { FamilyDataProvider } from '@/hooks/FamilyDataContext';
 import { useTimezoneDetection } from '@/hooks/useTimezoneDetection';
 import PageWithLayout from '@/pages/PageWithLayout'; // new helper component
+import VoiceConversation from '@/components/common/VoiceConversation';
 
 import Index from '@/pages/Index';
 import RequireAuth from '@/pages/RequireAuth';
@@ -28,7 +29,7 @@ import DataCleanup from '@/pages/DataCleanup';
 import DatabaseRecovery from '@/pages/DatabaseRecovery';
 import ResetPasswordRequest from '@/pages/ResetPasswordRequest';
 import ResetPassword from '@/pages/ResetPassword';
-import PlanningAgent from '@/pages/PlanningAgent';
+import Insights from '@/pages/Insights';
 
 function App() {
   // Automatically detect and store user timezone
@@ -52,7 +53,7 @@ function App() {
           <Route path="/connectors" element={<RequireAuth><PageWithLayout><Connectors /></PageWithLayout></RequireAuth>} />
           <Route path="/chat" element={<RequireAuth><PageWithLayout><Chat /></PageWithLayout></RequireAuth>} />
           <Route path="/aiassistant" element={<RequireAuth><PageWithLayout><AIAssistant /></PageWithLayout></RequireAuth>} />
-          <Route path="/agent" element={<RequireAuth><PageWithLayout><PlanningAgent /></PageWithLayout></RequireAuth>} />
+          <Route path="/insights" element={<RequireAuth><PageWithLayout><Insights /></PageWithLayout></RequireAuth>} />
           <Route path="/debug" element={<RequireAuth><PageWithLayout><Debug /></PageWithLayout></RequireAuth>} />
           <Route path="/admin" element={<RequireAuth><PageWithLayout><Admin /></PageWithLayout></RequireAuth>} />
           <Route path="/platformadmin" element={<RequireAuth><PageWithLayout><PlatformAdmin /></PageWithLayout></RequireAuth>} />
@@ -61,6 +62,7 @@ function App() {
           <Route path="/reset-password-request" element={<ResetPasswordRequest />} />
           <Route path="/reset-password" element={<ResetPassword />} />
         </Routes>
+        <VoiceConversation />
         <Toaster />
       </FamilyDataProvider>
     </LanguageProvider>

@@ -30,7 +30,7 @@ import {
   Bot,
   List,
   Bell,
-  Brain
+  Lightbulb
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
@@ -487,7 +487,7 @@ function LayoutContent({ children, currentPageName }) {
     { title: t('schedule') || 'Schedule', url: createPageUrl("Schedule"), icon: Calendar, id: 'sidebar-schedule' },
     { title: t('events') || 'Events', url: createPageUrl("Events"), icon: List, id: 'sidebar-events' },
     { title: t('tasks') || 'Tasks', url: createPageUrl("Tasks"), icon: CheckSquare, id: 'sidebar-tasks' },
-    { title: t('planningAgent') || 'Planning Agent', url: createPageUrl("agent"), icon: Brain, id: 'sidebar-agent' }
+    { title: t('insights') || 'Insights', url: createPageUrl("Insights"), icon: Lightbulb, id: 'sidebar-insights' }
   ], [t]);
 
   const adminNavItems = useMemo(() => {
@@ -510,7 +510,7 @@ function LayoutContent({ children, currentPageName }) {
   };
 
   const showHeaderActions = useMemo(() => {
-    return ['Dashboard', 'Schedule', 'Tasks', 'FamilyMembers', 'Admin', 'PlatformAdmin', 'Connectors', 'Events','Chat', 'PlanningAgent'].includes(currentPageName);
+    return ['Dashboard', 'Schedule', 'Tasks', 'FamilyMembers', 'Admin', 'PlatformAdmin', 'Connectors', 'Events','Chat', 'Insights'].includes(currentPageName);
   }, [currentPageName]);
 
   const showAddAction = useMemo(() => {

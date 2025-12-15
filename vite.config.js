@@ -21,6 +21,13 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      // Realtime WebSocket for voice
+      '^/realtime': {
+        target: process.env.API_URL || 'http://localhost:8000',
+        ws: true,
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
   resolve: {
